@@ -1,0 +1,41 @@
+### تشغيل السيرفر أولاً: 
+### php artisan serve
+
+### 1. تحليل الفجوات والمهارات (Manual Text Example)
+POST http://127.0.0.1:8000/api/ai/cv/gap-analysis
+Content-Type: application/json
+Accept: application/json
+
+{
+    "target_job": "Flutter Developer",
+    "manual_text": "I am a fresh graduate with a degree in Computer Science. I know basic C++ and Java. I have no experience in mobile development yet."
+}
+
+### 2. توليد خطة التعلم واقتراح الكورسات
+POST http://127.0.0.1:8000/api/ai/career/roadmap
+Content-Type: application/json
+Accept: application/json
+
+{
+    "target_job": "Flutter Developer",
+    "missing_skills": ["Dart Programming", "Flutter Widgets", "State Management (Provider/Riverpod)", "API Integration in Flutter"]
+}
+
+### 3. توليد الكويز
+POST http://127.0.0.1:8000/api/ai/career/quiz
+Content-Type: application/json
+Accept: application/json
+
+{
+    "skills_to_test": ["Dart Programming", "Flutter Widgets"]
+}
+
+### 4. توليد السيرة الذاتية (ATS)
+POST http://127.0.0.1:8000/api/ai/cv/generate
+Content-Type: application/json
+Accept: application/json
+
+{
+    "user_data_text": "I am a fresh graduate with a degree in Computer Science. I know basic C++ and Java.",
+    "new_skills": ["Dart Programming", "Flutter Widgets", "State Management (Provider/Riverpod)", "API Integration in Flutter"]
+}
