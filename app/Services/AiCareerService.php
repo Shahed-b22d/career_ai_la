@@ -87,9 +87,35 @@ class AiCareerService
      */
     public function analyzeGap(string $cvText, string $targetJob): array
     {
-        $systemInstruction = "You are an expert HR and Career Advisor. Analyze the user's CV against the job requirements for the target role. Return the response ONLY as a valid JSON object format containing 'current_skills' (array) and 'missing_skills' (array). Do not add any markdown formatting like ```json.";
+        $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board' consisting of 4 distinct personas:
+1. ATS & HR Specialist (Focuses on keywords, formatting, and soft skills)
+2. Senior Tech Lead (Focuses on technical depth, tooling, and modern stack relevance)
+3. Hiring Manager / CTO (Focuses on business impact, leadership, and problem-solving)
+4. Career Advisor (Synthesizes the critiques into constructive feedback and actionable steps)
+
+Your task is to review the candidate's CV for the target job role. First, internally simulate a discussion among the HR, Tech Lead, and Manager to evaluate the CV. Then, as the Career Advisor, synthesize their findings into a cohesive, hallucination-free JSON response.
+Format your output strictly as a raw JSON object (No markdown wrappers like ```json, no explanations outside the JSON).
+Schema:
+{
+  \"current_skills\": [\"list of existing skills extracted accurately from the CV\"],
+  \"missing_skills\": [\"list of critical missing hard/soft skills required for the target job based on the panel's consensus\"],
+  \"panel_feedback\": \"A concise, encouraging summary from the Career Advisor combining the perspectives of the HR, Tech Lead, and Hiring Manager.\"
+}";
         
-        $prompt = "Target Job Role: {$targetJob}\n\nHere is the user's CV in raw text:\n{$cvText}\n\nWhat are the vital missing skills they need to acquire to be competitive for this role in the current job market?";
+        $prompt = "Target Job Role: {$targetJob}
+
+Below is the user's raw CV text (which may contain messy formatting or OCR errors due to PDF extraction - please interpret intelligently):
+---
+{$cvText}
+---
+
+Instructions:
+1. HR Specialist Step: Analyze for soft skills and ATS keyword matches for '{$targetJob}'.
+2. Tech Lead Step: Analyze for required hard skills, technical depth, and missing modern tools.
+3. Hiring Manager Step: Analyze for leadership, impact, and overall market readiness.
+4. Career Advisor Step: Synthesize the 3 reviews, extract the definitive list of 'current_skills', pinpoint the most critical 'missing_skills', and write a concise, actionable summary ('panel_feedback') combining all views.
+5. DO NOT invent or hallucinate fake skills. Rely strictly on legitimate, globally recognized industry standard skills.
+Return ONLY the JSON.";
 
         $response = $this->callGemini($prompt, $systemInstruction);
         
@@ -137,12 +163,37 @@ class AiCareerService
             $scrapedData .= "Courses found online for {$skill}:\n{$scraped}\n\n";
         }
 
-        $systemInstruction = "You are a career and learning path expert. Output ONLY valid JSON containing 'roadmap' (string: step-by-step markdown) and 'suggested_courses' (array of objects containing 'title', 'url', 'skill'). Do not use ```json wrappers.";
+        $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board' consisting of 4 distinct personas:
+1. ATS & HR Specialist (Ensures the roadmap focuses on employable skills)
+2. Senior Tech Lead (Designs the technical learning phases and validates course quality)
+3. Hiring Manager (Ensures the learning outcomes align with real-world business needs)
+4. Career Advisor (Structures the roadmap to be highly motivating and practical for the user)
+
+Your collective goal is to construct a highly structured, practical learning roadmap and map it to specific courses.
+Output strictly as a raw JSON object (No markdown wrappers like ```json, no preamble).
+Schema:
+{
+  \"roadmap\": \"Highly detailed step-by-step markdown text defining the learning phases, written by the Career Advisor based on the panel's input...\",
+  \"suggested_courses\": [
+    {\"title\": \"Course Title\", \"url\": \"Course URL\", \"skill\": \"Target Skill\"}
+  ]
+}";
 
         $skillsStr = implode(", ", $missingSkills);
-        $prompt = "The user is aiming to become a {$targetJob} and is missing the following skills: {$skillsStr}.\n";
-        $prompt .= "Here is some recently scraped course data from the web:\n{$scrapedData}\n";
-        $prompt .= "Create a step-by-step learning roadmap and suggest specific courses (utilizing the scraped data if relevant, or your own knowledge) to help them land the job.";
+        $prompt = "Target Role: {$targetJob}. 
+The user urgently needs to acquire these missing skills: {$skillsStr}.
+
+Available scraped course data from the web:
+---
+{$scrapedData}
+---
+
+Instructions:
+1. Tech Lead Step: Filter the scraped courses and add your own top-tier suggestions (Coursera, Udemy, YouTube) for the missing skills.
+2. Hiring Manager Step: Prioritize the learning sequence based on what makes the candidate hirable fastest.
+3. Career Advisor Step: Write a detailed, phase-by-phase learning roadmap (in markdown format) tailored to mastering these skills, integrating the chosen courses.
+4. DO NOT invent or hallucinate fake course links. Only suggest real, verifiable courses.
+Return ONLY the JSON.";
 
         $response = $this->callGemini($prompt, $systemInstruction);
         $response = preg_replace('/```json|```/', '', $response);
@@ -156,9 +207,21 @@ class AiCareerService
      */
     public function generateQuiz(array $skillsToTest): array
     {
-        $systemInstruction = "You are a technical examiner. Generate a quiz. Output ONLY valid JSON format containing 'quiz' (array of objects with 'question', 'options' as array, and 'correct_answer'). No markdown wrappers.";
+        $systemInstruction = "You are an Expert Technical Assessor. Your job is to create challenging, practical multiple-choice questions to verify a user's comprehension of specific skills.
+Output strictly as a raw JSON object (No markdown wrappers like ```json).
+Schema:
+{
+  \"quiz\": [
+    {
+       \"question\": \"Clear, scenario-based or technical question?\",
+       \"options\": [\"A) ...\", \"B) ...\", \"C) ...\", \"D) ...\"],
+       \"correct_answer\": \"The exact string of the correct option\"
+    }
+  ]
+}";
         $skillsStr = implode(", ", $skillsToTest);
-        $prompt = "Generate a 5-question multiple choice quiz to test someone's basic to intermediate knowledge on the following newly acquired skills: {$skillsStr}.";
+        $prompt = "Generate a comprehensive 5-question multiple-choice quiz covering these newly acquired skills: {$skillsStr}. 
+Ensure the questions range from basic concepts to practical, intermediate scenarios. Every question must have exactly 4 options. The incorrect options (distractors) MUST be highly plausible and not trivially easy to guess. Return ONLY the JSON.";
 
         $response = $this->callGemini($prompt, $systemInstruction);
         $response = preg_replace('/```json|```/', '', $response);
@@ -172,12 +235,33 @@ class AiCareerService
      */
     public function generateAtsCv(string $userDataText, array $newSkills): string
     {
-        $systemInstruction = "You are an expert resume writer specialized in ATS-friendly formatting. Return ONLY valid HTML code for an ATS-friendly CV. Do not include ```html or any other markdown. The CV should be heavily optimized to pass through ATS systems.";
+        $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board' consisting of 4 distinct personas:
+1. ATS & HR Specialist (Focuses on strict ATS compatibility, semantic structure, and keyword density)
+2. Senior Tech Lead (Focuses on highlighting technical depth, achievements, and project complexity)
+3. Hiring Manager (Focuses on emphasizing business impact, leadership, and value)
+4. Career Advisor (Ensures the overall tone is professional, confident, and authentic)
+
+Your task is to collaboratively rewrite the user's CV data into a pristine, highly-optimized ATS-friendly HTML format, incorporating their newly mastered skills.
+Rules:
+1. Output ONLY valid, clean HTML code (No markdown like ```html).
+2. DO NOT use complex CSS, tables, columns, graphics, or ANY colors (strict black and white semantic text only).
+3. The layout MUST include: Contact Info (Header), Professional Summary, Core Competencies (Skills), Professional Experience, and Education.
+4. The HR ensures the format is ATS-friendly. The Tech Lead ensures technical skills are prominent. The Hiring Manager ensures impact is highlighted. The Career Advisor finalizes the professional tone.";
         
         $skillsStr = implode(", ", $newSkills);
-        $prompt = "Here is the user's initial information (from their old CV or manual entry):\n{$userDataText}\n\n";
-        $prompt .= "The user has now successfully learned and mastered these NEW skills: {$skillsStr}.\n\n";
-        $prompt .= "Rewrite their whole CV professionally. Incorporate the new skills naturally into their profile summary and skills section. Structure it nicely using basic inline HTML CSS so it looks clean when converted to PDF. Focus on simple, ATS compliant fonts and structure (Title, Summary, Skills, Experience, Education).";
+        $prompt = "User's Original Information/CV:
+---
+{$userDataText}
+---
+
+NEWLY Mastered Skills: {$skillsStr}.
+
+Instructions:
+1. HR Specialist Step: Organize the structure for flawless ATS parsing.
+2. Tech Lead Step: Integrate the 'NEWLY Mastered Skills' naturally and highlight technical achievements.
+3. Hiring Manager Step: Elevate the professional tone using strong action verbs to show business impact.
+4. Career Advisor Step: Finalize the CV to ensure it accurately and impressively represents the candidate.
+Return ONLY the clean HTML code.";
 
         $response = $this->callGemini($prompt, $systemInstruction);
         $htmlCv = preg_replace('/```html|```/', '', $response);
