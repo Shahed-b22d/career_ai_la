@@ -13,6 +13,9 @@ return [
     | a conventional file to locate the various service credentials.
     |
     */
+    'gemini' => [
+    'key' => env('GEMINI_API_KEY'),
+],
 
     'mailgun' => [
         'domain' => env('MAILGUN_DOMAIN'),

@@ -16,8 +16,7 @@ class AiCareerService
     public function __construct()
     {
         // يجب تعيين قيمة GEMINI_API_KEY في ملف .env
-        $this->geminiApiKey = env('GEMINI_API_KEY', '');
-    }
+        $this->geminiApiKey = config('services.gemini.key');    }
 
     /**
      * دالة مساعدة للاتصال بـ Gemini API
