@@ -131,26 +131,55 @@ Return ONLY the JSON.";
     }
 
     /**
-     * Scrape simple search results to simulate RAG for courses (Web Scraper)
+     * Scrape DuckDuckGo for REAL free courses across multiple platforms
      */
-    protected function scrapeGoogleForCourses(string $skill): string
+    protected function scrapeRealCoursesForSkill(string $skill): array
     {
-        // هذا مجرد نموذج مبسط لمحاكاة عملية الـ Web Scraping 
-        $searchQuery = urlencode("best free course OR tutorial for " . $skill);
-        $response = Http::withoutVerifying()->get("https://html.duckduckgo.com/html/?q={$searchQuery}");
-        
-        if ($response->successful()) {
-            try {
-                $crawler = new Crawler($response->body());
-                $results = $crawler->filter('.result__title .result__a')->slice(0, 5)->each(function (Crawler $node, $i) {
-                    return $node->text() . ' - URL: ' . $node->attr('href');
-                });
-                return implode("\n", $results);
-            } catch (\Exception $e) {
-                return '';
+        $platforms = [
+            'YouTube' => 'site:youtube.com "full course" OR tutorial',
+            'Coursera' => 'site:coursera.org "free course"',
+            'Udemy' => 'site:udemy.com "free tutorial"'
+        ];
+
+        $courses = [];
+
+        foreach ($platforms as $platformName => $searchQuery) {
+            $query = urlencode($searchQuery . ' ' . $skill);
+            $response = Http::withoutVerifying()
+                ->withHeaders([
+                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+                    'Accept-Language' => 'en-US,en;q=0.9'
+                ])
+                ->get("https://html.duckduckgo.com/html/?q={$query}");
+            
+            if ($response->successful()) {
+                try {
+                    $crawler = new Crawler($response->body());
+                    $firstResult = $crawler->filter('.result__title .result__a')->first();
+                    
+                    if ($firstResult->count() > 0) {
+                        $url = $firstResult->attr('href');
+                        // DuckDuckGo redirects wrapper: //duckduckgo.com/l/?uddg=...
+                        if (str_contains($url, 'uddg=')) {
+                            parse_str(parse_url($url, PHP_URL_QUERY) ?? '', $queryArgs);
+                            if (isset($queryArgs['uddg'])) {
+                                $url = urldecode($queryArgs['uddg']);
+                            }
+                        }
+                        
+                        $courses[] = [
+                            'platform' => $platformName,
+                            'title' => trim($firstResult->text()),
+                            'url' => $url
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    // Ignore extraction errors for this platform and continue
+                }
             }
         }
-        return '';
+
+        return $courses;
     }
 
     /**
@@ -158,50 +187,43 @@ Return ONLY the JSON.";
      */
     public function generateRoadmapAndCourses(array $missingSkills, string $targetJob): array
     {
-        // استخدام سكرابر مبسط لجلب عناوين دروس وكورسات من الويب للمهارات الأساسية
-        $scrapedData = "";
-        foreach (array_slice($missingSkills, 0, 3) as $skill) {
-            $scraped = $this->scrapeGoogleForCourses($skill);
-            $scrapedData .= "Courses found online for {$skill}:\n{$scraped}\n\n";
-        }
-
-        $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board' consisting of 4 distinct personas:
-1. ATS & HR Specialist (Ensures the roadmap focuses on employable skills)
-2. Senior Tech Lead (Designs the technical learning phases and validates course quality)
-3. Hiring Manager (Ensures the learning outcomes align with real-world business needs)
-4. Career Advisor (Structures the roadmap to be highly motivating and practical for the user)
-
-Your collective goal is to construct a highly structured, practical learning roadmap and map it to specific courses.
+        $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board'.
+Your goal is to construct a highly structured, practical learning roadmap to help the candidate master missing skills.
 Output strictly as a raw JSON object (No markdown wrappers like ```json, no preamble).
 Schema:
 {
-  \"roadmap\": \"Highly detailed step-by-step markdown text defining the learning phases, written by the Career Advisor based on the panel's input...\",
-  \"suggested_courses\": [
-    {\"title\": \"Course Title\", \"url\": \"Course URL\", \"skill\": \"Target Skill\"}
-  ]
+  \"roadmap\": \"Highly detailed step-by-step markdown text defining the learning phases...\"
 }";
 
         $skillsStr = implode(", ", $missingSkills);
         $prompt = "Target Role: {$targetJob}. 
 The user urgently needs to acquire these missing skills: {$skillsStr}.
 
-Available scraped course data from the web:
----
-{$scrapedData}
----
-
 Instructions:
-1. Tech Lead Step: Filter the scraped courses and add your own top-tier suggestions (Coursera, Udemy, YouTube) for the missing skills.
-2. Hiring Manager Step: Prioritize the learning sequence based on what makes the candidate hirable fastest.
-3. Career Advisor Step: Write a detailed, phase-by-phase learning roadmap (in markdown format) tailored to mastering these skills, integrating the chosen courses.
-4. DO NOT invent or hallucinate fake course links. Only suggest real, verifiable courses.
+1. Write a detailed, phase-by-phase learning roadmap (in markdown format) tailored to mastering these specific skills.
+2. Provide actionable advice for a junior/mid-level professional.
 Return ONLY the JSON.";
 
         $response = $this->callGemini($prompt, $systemInstruction);
         $response = preg_replace('/```json|```/', '', $response);
         $response = trim($response);
         
-        return json_decode($response, true) ?: ['roadmap' => '', 'suggested_courses' => []];
+        $aiData = json_decode($response, true) ?: ['roadmap' => ''];
+
+        // 🚀 SMART SCRAPER: Inject real courses fetched directly via PHP
+        $skillsCourses = [];
+        // Limit to top 3 missing skills to avoid excessive search delays
+        foreach (array_slice($missingSkills, 0, 3) as $skill) {
+            $skillsCourses[] = [
+                'skill' => $skill,
+                'courses' => $this->scrapeRealCoursesForSkill($skill)
+            ];
+        }
+        
+        // Merge the true courses into the final output
+        $aiData['skills_courses'] = $skillsCourses;
+        
+        return $aiData;
     }
 
     /**

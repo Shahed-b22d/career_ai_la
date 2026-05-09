@@ -89,7 +89,7 @@ class AiController extends Controller
                 'target_job' => $request->input('target_job'),
                 'roadmap_text' => $roadmapAndCourses['roadmap'] ?? '',
                 'missing_skills' => $request->input('missing_skills'),
-                'suggested_courses' => $roadmapAndCourses['suggested_courses'] ?? [],
+                'suggested_courses' => $roadmapAndCourses['skills_courses'] ?? [],
             ]);
 
             return response()->json([
