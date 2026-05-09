@@ -69,17 +69,20 @@ class AiCareerService
     /**
      * 1. قراءة الـ CV باستخدام Spatie/pdf-to-text
      */
-    public function readCv(string $pdfFilePath): string
+        public function readCv(string $pdfFilePath): string
     {
         if (!file_exists($pdfFilePath)) {
             throw new Exception("The uploaded CV file was not found.");
         }
 
-        // ملاحظة: يتطلب تثبيت أداة pdftotext على نظام التشغيل لتشغيل الحزمة بنجاح
-        $text = Pdf::getText($pdfFilePath);
+        // استخدام مكتبة Smalot بدلاً من Spatie
+        $parser = new \Smalot\PdfParser\Parser();
+        $pdf = $parser->parseFile($pdfFilePath);
+        $text = $pdf->getText();
         
         return $text;
     }
+
 
     /**
      * 3. استخراج المهارات الناقصة بناءً على ملف الـ CV والوظيفة المستهدفة
@@ -219,8 +222,9 @@ Schema:
   ]
 }";
         $skillsStr = implode(", ", $skillsToTest);
-        $prompt = "Generate a comprehensive 5-question multiple-choice quiz covering these newly acquired skills: {$skillsStr}. 
-Ensure the questions range from basic concepts to practical, intermediate scenarios. Every question must have exactly 4 options. The incorrect options (distractors) MUST be highly plausible and not trivially easy to guess. Return ONLY the JSON.";
+        $randomSeed = uniqid(); // لمنع تكرار نفس الأسئلة
+        $prompt = "Generate a completely UNIQUE and randomized 5-question multiple-choice quiz covering these newly acquired skills: {$skillsStr}. (Random Seed: {$randomSeed}).
+Ensure the questions range from basic concepts to practical, intermediate scenarios. Do NOT use generic or frequently repeated questions. Every question must have exactly 4 options. The incorrect options (distractors) MUST be highly plausible. Return ONLY the JSON.";
 
         $response = $this->callGemini($prompt, $systemInstruction);
         $response = preg_replace('/```json|```/', '', $response);

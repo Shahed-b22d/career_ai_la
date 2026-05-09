@@ -57,6 +57,7 @@ class AiController extends Controller
             return response()->json([
                 'success' => true,
                 'resume_id' => $resume->id,
+                'cv_text' => $cvText,
                 'data' => $analysisResult 
             ]);
 
