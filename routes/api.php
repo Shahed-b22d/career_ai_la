@@ -19,8 +19,16 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 });
 
 use App\Http\Controllers\AiController;
+use App\Http\Controllers\AuthController;
 
 // مسارات الذكاء الاصطناعي المجانية والاحترافية
+Route::post('/auth/register', [AuthController::class, 'register']);
+Route::post('/auth/login', [AuthController::class, 'login']);
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/auth/logout', [AuthController::class, 'logout']);
+});
+
 Route::prefix('ai')->group(function () {
     // 1 & 3: قراءة الـ CV وتحديد المهارات الناقصة بناءً على الشاغر المطلوب
     Route::post('/cv/gap-analysis', [AiController::class, 'analyzeGap']);
