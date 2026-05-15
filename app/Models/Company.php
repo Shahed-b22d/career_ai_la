@@ -13,6 +13,7 @@ class Company extends Model
         'user_id',
         'phone',
         'business_type',
+        'commercial_register_path',
     ];
 
     public function user()

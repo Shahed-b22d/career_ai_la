@@ -20,6 +20,7 @@ class AuthController extends Controller
             'role' => 'required|in:job,company',
             'phone' => 'nullable|string|max:20',
             'business_type' => 'nullable|string|max:255',
+            'commercial_register_file' => 'nullable|file|mimes:pdf,png,jpg,jpeg|max:5120',
         ]);
 
         if ($validator->fails()) {
@@ -35,11 +36,17 @@ class AuthController extends Controller
             'business_type' => $request->business_type,
         ]);
 
+        $commercialRegisterPath = null;
+        if ($request->hasFile('commercial_register_file')) {
+            $commercialRegisterPath = $request->file('commercial_register_file')->store('commercial_registers', 'public');
+        }
+
         if ($request->role === 'company') {
             Company::create([
                 'user_id' => $user->id,
                 'phone' => $request->phone,
                 'business_type' => $request->business_type,
+                'commercial_register_path' => $commercialRegisterPath,
             ]);
         } else {
             JobSeeker::create([
