@@ -19,14 +19,10 @@ class AiCareerService
         $this->geminiApiKey = config('services.gemini.key');    }
 
     /**
-     * دالة مساعدة للاتصال بـ Gemini API
+     * دالة عامة للاتصال بـ Gemini
      */
-    protected function callGemini(string $prompt, ?string $systemInstruction = null): string
+    protected function callGemini(string $prompt, string $systemInstruction = null): string
     {
-        if (empty($this->geminiApiKey)) {
-            throw new Exception("Gemini API Key is missing. Please add GEMINI_API_KEY to your .env file.");
-        }
-
         $payload = [
             'contents' => [
                 [
@@ -48,22 +44,38 @@ class AiCareerService
             ];
         }
 
-        $response = Http::retry(3, 2000)
-            ->timeout(120)
-            ->withoutVerifying()
-            ->withHeaders([
-            'Content-Type' => 'application/json',
-        ])->post($this->geminiUrl . '?key=' . $this->geminiApiKey, $payload);
+        Log::info("DEBUG: API Key Hint: " . substr($this->geminiApiKey, 0, 4) . "...");
+        
+        $url = $this->geminiUrl . '?key=' . $this->geminiApiKey;
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+        
+        $responseRaw = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
 
-        if ($response->successful()) {
-            $data = $response->json();
+        Log::info("DEBUG: Gemini CURL HTTP Status: " . $httpCode);
+        if ($curlError) {
+            Log::info("DEBUG: CURL Error: " . $curlError);
+        }
+
+        Log::info("DEBUG: Gemini Raw Response: " . $responseRaw);
+
+        if ($httpCode == 200) {
+            $data = json_decode($responseRaw, true);
             if (isset($data['candidates'][0]['content']['parts'][0]['text'])) {
                 return $data['candidates'][0]['content']['parts'][0]['text'];
             }
         }
 
-        Log::error("Gemini API Error: " . $response->body());
-        throw new Exception("Failed to get response from AI. " . $response->body());
+        Log::error("Gemini API Error: " . ($curlError ?: $responseRaw));
+        throw new Exception("Failed to get response from AI. " . ($curlError ?: $responseRaw));
     }
 
     /**
@@ -89,41 +101,34 @@ class AiCareerService
      */
     public function analyzeGap(string $cvText, string $targetJob): array
     {
-        $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board' consisting of 4 distinct personas:
-1. ATS & HR Specialist (Focuses on keywords, formatting, and soft skills)
-2. Senior Tech Lead (Focuses on technical depth, tooling, and modern stack relevance)
-3. Hiring Manager / CTO (Focuses on business impact, leadership, and problem-solving)
-4. Career Advisor (Synthesizes the critiques into constructive feedback and actionable steps)
-
-Your task is to review the candidate's CV for the target job role. First, internally simulate a discussion among the HR, Tech Lead, and Manager to evaluate the CV. Then, as the Career Advisor, synthesize their findings into a cohesive, hallucination-free JSON response.
-Format your output strictly as a raw JSON object (No markdown wrappers like ```json, no explanations outside the JSON).
+        $systemInstruction = "Format your output strictly as a raw JSON object (No markdown wrappers like ```json, no explanations outside the JSON).
 Schema:
 {
-  \"current_skills\": [\"list of existing skills extracted accurately from the CV\"],
-  \"missing_skills\": [\"list of critical missing hard/soft skills required for the target job based on the panel's consensus\"],
-  \"panel_feedback\": \"A concise, encouraging summary from the Career Advisor combining the perspectives of the HR, Tech Lead, and Hiring Manager.\"
+  \"current_skills\": [\"list of EXISTING skills (CONCISE, 1-3 words each)\"],
+  \"missing_skills\": [\"list of MISSING skills (CONCISE, 1-3 words each)\"],
+  \"panel_feedback\": \"A concise, encouraging summary from the Career Advisor.\"
 }";
         
         $prompt = "Target Job Role: {$targetJob}
 
-Below is the user's raw CV text (which may contain messy formatting or OCR errors due to PDF extraction - please interpret intelligently):
+User's CV text:
 ---
 {$cvText}
 ---
 
 Instructions:
-1. HR Specialist Step: Analyze for soft skills and ATS keyword matches for '{$targetJob}'.
-2. Tech Lead Step: Analyze for required hard skills, technical depth, and missing modern tools.
-3. Hiring Manager Step: Analyze for leadership, impact, and overall market readiness.
-4. Career Advisor Step: Synthesize the 3 reviews, extract the definitive list of 'current_skills', pinpoint the most critical 'missing_skills', and write a concise, actionable summary ('panel_feedback') combining all views.
-5. DO NOT invent or hallucinate fake skills. Rely strictly on legitimate, globally recognized industry standard skills.
-Return ONLY the JSON.";
+1. Extract 'current_skills' and 'missing_skills' using standard terms.
+2. KEEP SKILL NAMES SHORT (e.g., 'Flutter' instead of 'Complex App Architecture').
+3. Return ONLY the JSON.";
 
+        Log::info("DEBUG: Calling Gemini for Analysis...");
         $response = $this->callGemini($prompt, $systemInstruction);
+        Log::info("DEBUG: Gemini Raw Response: " . $response);
         
-        // تنظيف الرد إذا كان يحتوي على markdown block (```json ... ```)
-        $response = preg_replace('/```json|```/', '', $response);
-        $response = trim($response);
+        // استخراج الـ JSON فقط من بين الأقواس المجعدة { ... }
+        if (preg_match('/\{.*\}/s', $response, $matches)) {
+            $response = $matches[0];
+        }
 
         $parsed = json_decode($response, true);
         
@@ -188,42 +193,38 @@ Return ONLY the JSON.";
     public function generateRoadmapAndCourses(array $missingSkills, string $targetJob): array
     {
         $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board'.
-Your goal is to construct a highly structured, practical learning roadmap to help the candidate master missing skills.
-Output strictly as a raw JSON object (No markdown wrappers like ```json, no preamble).
+Your goal is to construct a highly structured, practical learning roadmap and suggest real courses.
+Output strictly as a raw JSON object.
 Schema:
 {
-  \"roadmap\": \"Highly detailed step-by-step markdown text defining the learning phases...\"
+  \"roadmap\": \"Highly detailed step-by-step markdown text defining the learning phases...\",
+  \"skills_courses\": [
+    {
+      \"skill\": \"Skill Name\",
+      \"courses\": [
+        {\"platform\": \"YouTube\", \"title\": \"Course Title\", \"url\": \"link\"},
+        {\"platform\": \"Coursera/Udemy\", \"title\": \"Course Title\", \"url\": \"link\"}
+      ]
+    }
+  ]
 }";
-
         $skillsStr = implode(", ", $missingSkills);
         $prompt = "Target Role: {$targetJob}. 
-The user urgently needs to acquire these missing skills: {$skillsStr}.
-
+The user needs to acquire: {$skillsStr}.
 Instructions:
-1. Write a detailed, phase-by-phase learning roadmap (in markdown format) tailored to mastering these specific skills.
-2. Provide actionable advice for a junior/mid-level professional.
+1. Write a detailed learning roadmap (markdown).
+2. For each skill, suggest 2-3 real courses with titles and URLs.
 Return ONLY the JSON.";
 
         $response = $this->callGemini($prompt, $systemInstruction);
-        $response = preg_replace('/```json|```/', '', $response);
-        $response = trim($response);
-        
-        $aiData = json_decode($response, true) ?: ['roadmap' => ''];
-
-        // 🚀 SMART SCRAPER: Inject real courses fetched directly via PHP
-        $skillsCourses = [];
-        // Limit to top 3 missing skills to avoid excessive search delays
-        foreach (array_slice($missingSkills, 0, 3) as $skill) {
-            $skillsCourses[] = [
-                'skill' => $skill,
-                'courses' => $this->scrapeRealCoursesForSkill($skill)
-            ];
+        // استخراج الـ JSON فقط من بين الأقواس المجعدة { ... }
+        if (preg_match('/\{.*\}/s', $response, $matches)) {
+            $response = $matches[0];
         }
         
-        // Merge the true courses into the final output
-        $aiData['skills_courses'] = $skillsCourses;
+        $aiData = json_decode($response, true);
         
-        return $aiData;
+        return $aiData ?: ['roadmap' => '', 'skills_courses' => []];
     }
 
     /**
@@ -244,15 +245,21 @@ Schema:
   ]
 }";
         $skillsStr = implode(", ", $skillsToTest);
-        $randomSeed = uniqid(); // لمنع تكرار نفس الأسئلة
-        $prompt = "Generate a completely UNIQUE and randomized 5-question multiple-choice quiz covering these newly acquired skills: {$skillsStr}. (Random Seed: {$randomSeed}).
-Ensure the questions range from basic concepts to practical, intermediate scenarios. Do NOT use generic or frequently repeated questions. Every question must have exactly 4 options. The incorrect options (distractors) MUST be highly plausible. Return ONLY the JSON.";
+        $prompt = "Create a 5-question multiple-choice quiz about: {$skillsStr}. 
+Each question must have 4 options and one 'correct_answer' (matching one of the options). 
+Return ONLY raw JSON.";
 
         $response = $this->callGemini($prompt, $systemInstruction);
-        $response = preg_replace('/```json|```/', '', $response);
-        $response = trim($response);
+        Log::info("Gemini Quiz Response: " . $response);
+        
+        // استخراج الـ JSON فقط من بين الأقواس المجعدة { ... }
+        if (preg_match('/\{.*\}/s', $response, $matches)) {
+            $response = $matches[0];
+        }
 
-        return json_decode($response, true) ?: ['quiz' => []];
+        $parsed = json_decode($response, true);
+        
+        return $parsed ?: ['quiz' => []];
     }
 
     /**

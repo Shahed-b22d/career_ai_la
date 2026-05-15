@@ -22,6 +22,8 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'phone',
+        'business_type',
     ];
 
     public function jobSeeker()

@@ -15,10 +15,14 @@ class UserRoadmap extends Model
         'roadmap_text',
         'missing_skills',
         'suggested_courses',
+        'completed_skills',
+        'is_active',
     ];
 
     protected $casts = [
         'missing_skills' => 'array',
         'suggested_courses' => 'array',
+        'completed_skills' => 'array',
+        'is_active' => 'boolean',
     ];
 }

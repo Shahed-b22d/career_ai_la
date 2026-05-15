@@ -13,6 +13,8 @@ return new class extends Migration
     {
         Schema::table('users', function (Blueprint $table) {
             $table->enum('role', ['job', 'company'])->default('job')->after('email');
+            $table->string('phone')->nullable()->after('role');
+            $table->string('business_type')->nullable()->after('phone');
         });
     }
 

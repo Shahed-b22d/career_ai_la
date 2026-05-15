@@ -8,6 +8,7 @@ use App\Models\UserResume;
 use App\Models\UserRoadmap;
 use App\Models\UserQuiz;
 use Exception;
+use Illuminate\Support\Facades\Log;
 
 class AiController extends Controller
 {
@@ -25,6 +26,7 @@ class AiController extends Controller
      */
     public function analyzeGap(Request $request)
     {
+        Log::info("DEBUG: analyzeGap Request Started");
         $request->validate([
             'target_job' => 'required|string',
             'cv_file' => 'nullable|file|mimes:pdf|max:2048',
@@ -32,9 +34,11 @@ class AiController extends Controller
         ]);
 
         try {
+            Log::info("DEBUG: Validation Passed. Target: " . $request->target_job);
             $cvText = "";
             if ($request->hasFile('cv_file')) {
                 // قراءة الـ PDF
+                Log::info("DEBUG: Calling Gemini for Analysis...");
                 $cvText = $this->aiService->readCv($request->file('cv_file')->getPathname());
             } elseif ($request->filled('manual_text')) {
                 $cvText = $request->input('manual_text');
@@ -78,6 +82,9 @@ class AiController extends Controller
         ]);
 
         try {
+            // جعل كل المسارات القديمة غير نشطة
+            UserRoadmap::where('user_id', auth()->id())->update(['is_active' => false]);
+
             $roadmapAndCourses = $this->aiService->generateRoadmapAndCourses(
                 $request->input('missing_skills'),
                 $request->input('target_job')
@@ -90,6 +97,7 @@ class AiController extends Controller
                 'roadmap_text' => $roadmapAndCourses['roadmap'] ?? '',
                 'missing_skills' => $request->input('missing_skills'),
                 'suggested_courses' => $roadmapAndCourses['skills_courses'] ?? [],
+                'is_active' => true, // ✅ تحديد أنه المسار الحالي النشط
             ]);
 
             return response()->json([
@@ -108,12 +116,16 @@ class AiController extends Controller
      */
     public function generateQuiz(Request $request)
     {
+        Log::info("DEBUG: Quiz Request Started");
+        
         $request->validate([
             'skills_to_test' => 'required|array',
         ]);
 
         try {
+            Log::info("DEBUG: Calling AI for skills: " . json_encode($request->input('skills_to_test')));
             $quiz = $this->aiService->generateQuiz($request->input('skills_to_test'));
+            Log::info("DEBUG: AI Response received");
 
             // حفظ الاختبار لاستخدامه لاحقاً عند تصحيح الأجوبة
             $userQuiz = UserQuiz::create([
@@ -159,5 +171,63 @@ class AiController extends Controller
         } catch (Exception $e) {
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * جلب المسار التعليمي النشط للمستخدم
+     */
+    public function getActiveRoadmap()
+    {
+        $roadmap = UserRoadmap::where('user_id', auth()->id())
+            ->where('is_active', true)
+            ->latest()
+            ->first();
+
+        if (!$roadmap) {
+            return response()->json(['success' => false, 'message' => 'No active roadmap found.'], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $roadmap->id,
+                'target_job' => $roadmap->target_job,
+                'roadmap' => $roadmap->roadmap_text,
+                'skills_courses' => $roadmap->suggested_courses,
+                'completed_skills' => $roadmap->completed_skills ?? [],
+                'missing_skills' => $roadmap->missing_skills,
+                'created_at' => $roadmap->created_at,
+            ]
+        ]);
+    }
+
+    /**
+     * تحديث التقدم في المسار (إكمال مهارة)
+     */
+    public function updateProgress(Request $request)
+    {
+        $request->validate([
+            'skill' => 'required|string',
+        ]);
+
+        $roadmap = UserRoadmap::where('user_id', auth()->id())
+            ->where('is_active', true)
+            ->latest()
+            ->first();
+
+        if (!$roadmap) {
+            return response()->json(['success' => false, 'message' => 'No active roadmap found.'], 404);
+        }
+
+        $completed = $roadmap->completed_skills ?? [];
+        if (!in_array($request->skill, $completed)) {
+            $completed[] = $request->skill;
+            $roadmap->update(['completed_skills' => $completed]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'completed_skills' => $completed
+        ]);
     }
 }
