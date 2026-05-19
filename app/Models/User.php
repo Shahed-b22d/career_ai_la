@@ -37,6 +37,11 @@ class User extends Authenticatable
         return $this->hasOne(Company::class);
     }
 
+    public function resume()
+    {
+        return $this->hasOne(UserResume::class);
+    }
+
     /**
      * The attributes that should be hidden for serialization.
      *

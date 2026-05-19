@@ -20,6 +20,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 use App\Http\Controllers\AiController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\JobController;
 
 // مسارات الذكاء الاصطناعي المجانية والاحترافية
 Route::post('/auth/register', [AuthController::class, 'register']);
@@ -28,6 +29,11 @@ Route::post('/auth/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
+    
+    // Job posting & Retrieval
+    Route::post('/jobs', [JobController::class, 'postJob']);
+    Route::get('/jobs', [JobController::class, 'getActiveJobs']);
+    Route::get('/company/dashboard', [JobController::class, 'getCompanyDashboardData']);
 
     Route::prefix('ai')->group(function () {
         // 1 & 3: قراءة الـ CV وتحديد المهارات الناقصة بناءً على الشاغر المطلوب
@@ -46,3 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/cv/generate', [AiController::class, 'generateAtsCv']);
     });
 });
+
+// Public payment success/cancel endpoints
+Route::get('/jobs/payment-success', [JobController::class, 'paymentSuccess']);
+Route::get('/jobs/payment-cancel', [JobController::class, 'paymentCancel']);

@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+use App\Http\Controllers\JobController;
+
 Route::get('/', function () {
     return view('welcome');
 });
+
+Route::get('/jobs/checkout/{job_id}', [JobController::class, 'showMockCheckout']);
