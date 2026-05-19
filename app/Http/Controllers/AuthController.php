@@ -24,6 +24,7 @@ class AuthController extends Controller
             'role'                    => 'required|in:job,company',
             'phone'                   => 'nullable|string|max:20',
             'business_type'           => 'nullable|string|max:255',
+            'governorate'             => 'required|string|max:255',
             'commercial_register_file'=> 'nullable|file|mimes:pdf,png,jpg,jpeg|max:5120',
         ]);
 
@@ -42,6 +43,7 @@ class AuthController extends Controller
             'role'          => $request->role,
             'phone'         => $request->phone,
             'business_type' => $request->business_type,
+            'governorate'   => $request->governorate,
         ]);
 
         // Create role-specific profile

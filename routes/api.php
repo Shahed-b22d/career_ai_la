@@ -32,6 +32,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('ai')->group(function () {
         // 1 & 3: قراءة الـ CV وتحديد المهارات الناقصة بناءً على الشاغر المطلوب
         Route::post('/cv/gap-analysis', [AiController::class, 'analyzeGap']);
+        Route::get('/cv/latest', [AiController::class, 'getLatestCv']);
 
         // 4 & 5: توليد خريطة التعلم واقتراح الكورسات
         Route::post('/career/roadmap', [AiController::class, 'generateRoadmap']);

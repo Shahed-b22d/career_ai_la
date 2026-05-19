@@ -230,4 +230,30 @@ class AiController extends Controller
             'completed_skills' => $completed
         ]);
     }
+
+    /**
+     * Get the latest resume/CV text of the user
+     */
+    public function getLatestCv()
+    {
+        $resume = UserResume::where('user_id', auth()->id())
+            ->latest()
+            ->first();
+
+        if (!$resume) {
+            return response()->json(['success' => false, 'message' => 'No resume found.'], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $resume->id,
+                'target_job' => $resume->target_job,
+                'original_text' => $resume->original_text,
+                'current_skills' => $resume->current_skills ?? [],
+                'missing_skills' => $resume->missing_skills ?? [],
+                'created_at' => $resume->created_at,
+            ]
+        ]);
+    }
 }
