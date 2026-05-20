@@ -8,6 +8,7 @@ use App\Models\JobSeeker;
 use App\Models\Company;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Storage;
 
 class AuthController extends Controller
 {
@@ -158,6 +159,68 @@ class AuthController extends Controller
 
         return response()->json([
             'user' => $user,
+        ], 200);
+    }
+
+    /**
+     * Update user profile
+     */
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+
+        $validator = Validator::make($request->all(), [
+            'name'          => 'nullable|string|max:255',
+            'email'         => 'nullable|string|email|max:255|unique:users,email,' . $user->id,
+            'phone'         => 'nullable|string|max:20',
+            'governorate'   => 'nullable|string|max:255',
+            'business_type' => 'nullable|string|max:255',
+            'description'   => 'nullable|string',
+            'avatar'        => 'nullable|image|mimes:jpeg,png,jpg,gif|max:5120',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => $validator->errors()->first(),
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        if ($request->has('name')) $user->name = $request->name;
+        if ($request->has('email')) $user->email = $request->email;
+        if ($request->has('governorate')) $user->governorate = $request->governorate;
+        if ($request->has('phone')) $user->phone = $request->phone;
+
+        if ($request->hasFile('avatar')) {
+            if ($user->avatar_path && Storage::disk('public')->exists($user->avatar_path)) {
+                Storage::disk('public')->delete($user->avatar_path);
+            }
+            $user->avatar_path = $request->file('avatar')->store('avatars', 'public');
+        }
+
+        $user->save();
+
+        if ($user->role === 'company') {
+            $company = $user->company;
+            if ($company) {
+                if ($request->has('phone')) $company->phone = $request->phone;
+                if ($request->has('business_type')) $company->business_type = $request->business_type;
+                if ($request->has('description')) $company->description = $request->description;
+                $company->save();
+            }
+            $user->load('company');
+        } else {
+            $jobSeeker = $user->jobSeeker;
+            if ($jobSeeker) {
+                if ($request->has('phone')) $jobSeeker->phone = $request->phone;
+                $jobSeeker->save();
+            }
+            $user->load('jobSeeker');
+        }
+
+        return response()->json([
+            'message' => 'Profile updated successfully',
+            'user'    => $user,
         ], 200);
     }
 }
