@@ -26,6 +26,8 @@ use App\Http\Controllers\ComplaintController;
 // مسارات الذكاء الاصطناعي المجانية والاحترافية
 Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -36,6 +38,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/jobs', [JobController::class, 'postJob']);
     Route::get('/jobs', [JobController::class, 'getActiveJobs']);
     Route::get('/company/dashboard', [JobController::class, 'getCompanyDashboardData']);
+    Route::get('/candidates/suggested', [JobController::class, 'getSuggestedCandidates']);
 
     Route::post('/complaints', [ComplaintController::class, 'store']);
 

@@ -424,4 +424,73 @@ class JobController extends Controller
             ]
         ]);
     }
+
+    /**
+     * Get ALL suggested candidates for the Suggested Profiles screen
+     */
+    public function getSuggestedCandidates(Request $request)
+    {
+        $user = auth()->user();
+
+        // Company's active jobs for matching
+        $companyJobs = Job::where('user_id', $user->id)
+            ->where('is_paid', true)
+            ->get();
+
+        // All job seekers who have uploaded resumes
+        $resumes = \App\Models\UserResume::with('user')
+            ->whereHas('user', function ($q) {
+                $q->where('role', 'job');
+            })
+            ->latest()
+            ->get();
+
+        $candidates = [];
+
+        foreach ($resumes as $resume) {
+            if (!$resume->user) continue;
+
+            $bestMatchScore = 70;
+
+            foreach ($companyJobs as $job) {
+                if (
+                    stripos($job->title, $resume->target_job) !== false ||
+                    stripos($resume->target_job, $job->title) !== false
+                ) {
+                    $bestMatchScore = max($bestMatchScore, 95);
+                } else {
+                    $overlap = array_intersect(
+                        array_map('strtolower', $resume->current_skills ?? []),
+                        array_map('strtolower', explode(' ', $job->requirements . ' ' . $job->description))
+                    );
+                    if (count($overlap) > 0) {
+                        $bestMatchScore = max($bestMatchScore, min(70 + count($overlap) * 5, 94));
+                    }
+                }
+            }
+
+            if ($companyJobs->isEmpty()) {
+                $bestMatchScore = rand(85, 98);
+            }
+
+            $candidates[] = [
+                'name'          => $resume->user->name,
+                'role'          => $resume->target_job ?? 'Developer',
+                'match'         => "{$bestMatchScore}%",
+                'email'         => $resume->user->email,
+                'phone'         => $resume->user->phone ?? 'N/A',
+                'governorate'   => $resume->user->governorate ?? 'N/A',
+                'skills'        => $resume->current_skills ?? [],
+                'missing_skills'=> $resume->missing_skills ?? [],
+            ];
+        }
+
+        // Sort by match score descending
+        usort($candidates, fn($a, $b) => intval($b['match']) <=> intval($a['match']));
+
+        return response()->json([
+            'success' => true,
+            'data'    => $candidates,
+        ]);
+    }
 }
