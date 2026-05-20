@@ -265,7 +265,7 @@ Return ONLY raw JSON.";
     /**
      * 2. توليد CV احترافي بنظام ATS
      */
-    public function generateAtsCv(string $userDataText, array $newSkills): string
+    public function generateAtsCv(string $userDataText, array $newSkills, string $personalInfo = ""): string
     {
         $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board' consisting of 4 distinct personas:
 1. ATS & HR Specialist (Focuses on strict ATS compatibility, semantic structure, and keyword density)
@@ -281,7 +281,12 @@ Rules:
 4. The HR ensures the format is ATS-friendly. The Tech Lead ensures technical skills are prominent. The Hiring Manager ensures impact is highlighted. The Career Advisor finalizes the professional tone.";
         
         $skillsStr = implode(", ", $newSkills);
-        $prompt = "User's Original Information/CV:
+        $prompt = "User's Personal Information (MUST be used in the header of the CV exactly as provided, overriding any old contact info in the original text):
+---
+{$personalInfo}
+---
+
+User's Original Information/CV:
 ---
 {$userDataText}
 ---

@@ -156,9 +156,19 @@ class AiController extends Controller
         ]);
 
         try {
+            $user = auth()->user();
+            $personalInfo = "";
+            if ($user) {
+                $user->load('jobSeeker');
+                $phone = $user->jobSeeker->phone ?? 'Not specified';
+                $gov = $user->jobSeeker->governorate ?? 'Not specified';
+                $personalInfo = "Name: {$user->name}\nEmail: {$user->email}\nPhone: {$phone}\nLocation: {$gov}";
+            }
+
             $htmlCv = $this->aiService->generateAtsCv(
                 $request->input('user_data_text'),
-                $request->input('new_skills')
+                $request->input('new_skills'),
+                $personalInfo
             );
 
             // تحويل الـ HTML الذي أرجعه الذكاء الاصطناعي إلى PDF باستخدام laravel-dompdf
