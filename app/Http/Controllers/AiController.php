@@ -145,18 +145,89 @@ class AiController extends Controller
     }
 
     /**
+     * تقييم إجابات الكويز وتحديث المهارات المكتسبة
+     * POST /api/ai/career/quiz/submit
+     */
+    public function submitQuiz(Request $request)
+    {
+        $request->validate([
+            'quiz_id' => 'required|exists:user_quizzes,id',
+            'answers' => 'required|array',
+        ]);
+
+        try {
+            $userQuiz = UserQuiz::findOrFail($request->quiz_id);
+            
+            // التحقق من أن الكويز يخص المستخدم الحالي
+            if ($userQuiz->user_id !== auth()->id()) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+            }
+
+            // حساب النتيجة
+            $quizData = $userQuiz->quiz_data;
+            $userAnswers = $request->answers;
+            $correctCount = 0;
+            $totalQuestions = count($quizData);
+
+            foreach ($quizData as $index => $question) {
+                if (isset($userAnswers[$index]) && $userAnswers[$index] === $question['correct_answer']) {
+                    $correctCount++;
+                }
+            }
+
+            $score = ($correctCount / $totalQuestions) * 100;
+            
+            // حفظ النتيجة
+            $userQuiz->update(['score' => $score]);
+
+            // إذا نجح (أكثر من 70%)، نضيف المهارات إلى المهارات المكتسبة في الـ Roadmap
+            $passed = $score >= 70;
+            
+            if ($passed) {
+                $roadmap = UserRoadmap::where('user_id', auth()->id())
+                    ->where('is_active', true)
+                    ->latest()
+                    ->first();
+
+                if ($roadmap) {
+                    $completedSkills = $roadmap->completed_skills ?? [];
+                    foreach ($userQuiz->tested_skills as $skill) {
+                        if (!in_array($skill, $completedSkills)) {
+                            $completedSkills[] = $skill;
+                        }
+                    }
+                    $roadmap->update(['completed_skills' => $completedSkills]);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'score' => $score,
+                'passed' => $passed,
+                'correct_answers' => $correctCount,
+                'total_questions' => $totalQuestions,
+                'message' => $passed ? 'Congratulations! You passed the quiz.' : 'You need to score at least 70% to pass.'
+            ]);
+
+        } catch (Exception $e) {
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * 2: توليد سيرة ذاتية احترافية بصيغة ATS وإرجاعها كملف PDF
      * POST /api/ai/cv/generate
      */
     public function generateAtsCv(Request $request)
     {
         $request->validate([
-            'user_data_text' => 'required|string',
-            'new_skills' => 'required|array',
+            'include_new_skills' => 'boolean', // هل نضيف المهارات الجديدة المكتسبة؟
         ]);
 
         try {
             $user = auth()->user();
+            
+            // جلب معلومات المستخدم الشخصية
             $personalInfo = "";
             if ($user) {
                 $user->load('jobSeeker');
@@ -165,9 +236,42 @@ class AiController extends Controller
                 $personalInfo = "Name: {$user->name}\nEmail: {$user->email}\nPhone: {$phone}\nLocation: {$gov}";
             }
 
+            // جلب آخر CV تم رفعه أو المعلومات اليدوية
+            $latestResume = UserResume::where('user_id', auth()->id())
+                ->latest()
+                ->first();
+
+            if (!$latestResume) {
+                return response()->json([
+                    'success' => false, 
+                    'message' => 'No CV or manual information found. Please upload a CV or enter your information first.'
+                ], 404);
+            }
+
+            $userDataText = $latestResume->original_text;
+            $currentSkills = $latestResume->current_skills ?? [];
+
+            // جلب المهارات الجديدة المكتسبة من الكويزات الناجحة
+            $newSkills = [];
+            if ($request->input('include_new_skills', true)) {
+                $roadmap = UserRoadmap::where('user_id', auth()->id())
+                    ->where('is_active', true)
+                    ->latest()
+                    ->first();
+
+                if ($roadmap) {
+                    $newSkills = $roadmap->completed_skills ?? [];
+                }
+            }
+
+            // دمج المهارات الحالية مع الجديدة
+            $allSkills = array_unique(array_merge($currentSkills, $newSkills));
+
+            Log::info("DEBUG: Generating ATS CV with skills: " . json_encode($allSkills));
+
             $htmlCv = $this->aiService->generateAtsCv(
-                $request->input('user_data_text'),
-                $request->input('new_skills'),
+                $userDataText,
+                $allSkills,
                 $personalInfo
             );
 

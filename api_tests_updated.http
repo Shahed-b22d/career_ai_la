@@ -1,0 +1,171 @@
+### تشغيل السيرفر أولاً: 
+### php artisan serve
+
+### ============================================
+### Authentication (للحصول على Token)
+### ============================================
+
+### تسجيل الدخول
+POST http://127.0.0.1:8000/api/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+    "email": "test@example.com",
+    "password": "password"
+}
+
+### ============================================
+### 1. تحليل CV والمهارات الناقصة
+### ============================================
+
+### 1.1 تحليل باستخدام نص يدوي (Manual Text)
+POST http://127.0.0.1:8000/api/ai/cv/gap-analysis
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+Accept: application/json
+
+{
+    "target_job": "Flutter Developer",
+    "manual_text": "I am a fresh graduate with a degree in Computer Science. I know basic C++ and Java. I have no experience in mobile development yet. I worked on a university project using Java Spring Boot."
+}
+
+### 1.2 تحليل باستخدام ملف PDF (يجب تغيير الـ boundary والملف)
+# POST http://127.0.0.1:8000/api/ai/cv/gap-analysis
+# Authorization: Bearer YOUR_TOKEN_HERE
+# Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+# 
+# ------WebKitFormBoundary7MA4YWxkTrZu0gW
+# Content-Disposition: form-data; name="target_job"
+# 
+# Flutter Developer
+# ------WebKitFormBoundary7MA4YWxkTrZu0gW
+# Content-Disposition: form-data; name="cv_file"; filename="cv.pdf"
+# Content-Type: application/pdf
+# 
+# < ./cv.pdf
+# ------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+### 1.3 جلب آخر CV محفوظ
+GET http://127.0.0.1:8000/api/ai/cv/latest
+Authorization: Bearer YOUR_TOKEN_HERE
+Accept: application/json
+
+### ============================================
+### 2. توليد Roadmap والكورسات
+### ============================================
+
+### 2.1 توليد خطة التعلم
+POST http://127.0.0.1:8000/api/ai/career/roadmap
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+Accept: application/json
+
+{
+    "target_job": "Flutter Developer",
+    "missing_skills": ["Dart Programming", "Flutter Widgets", "State Management", "API Integration", "Testing"]
+}
+
+### 2.2 جلب Roadmap النشط
+GET http://127.0.0.1:8000/api/ai/career/my-roadmap
+Authorization: Bearer YOUR_TOKEN_HERE
+Accept: application/json
+
+### 2.3 تحديث التقدم يدوياً (إكمال مهارة)
+POST http://127.0.0.1:8000/api/ai/career/update-progress
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+Accept: application/json
+
+{
+    "skill": "Dart Programming"
+}
+
+### ============================================
+### 3. توليد وتقديم الكويز
+### ============================================
+
+### 3.1 توليد كويز لمهارات معينة
+POST http://127.0.0.1:8000/api/ai/career/quiz
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+Accept: application/json
+
+{
+    "skills_to_test": ["Dart Programming", "Flutter Widgets"]
+}
+
+### 3.2 تقديم إجابات الكويز (✨ جديد - محدث)
+POST http://127.0.0.1:8000/api/ai/career/quiz/submit
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+Accept: application/json
+
+{
+    "quiz_id": 1,
+    "answers": [
+        "A) Answer option 1",
+        "B) Answer option 2",
+        "C) Answer option 3",
+        "D) Answer option 4",
+        "A) Answer option 5"
+    ]
+}
+
+### ملاحظة: يجب أن تطابق الإجابات بالضبط النص الموجود في الخيارات
+### مثال: إذا كان الخيار "A) setState" يجب أن تكون الإجابة "A) setState"
+
+### ============================================
+### 4. توليد ATS CV (✨ محدث - يجلب البيانات تلقائياً)
+### ============================================
+
+### 4.1 توليد CV مع المهارات الجديدة المكتسبة
+POST http://127.0.0.1:8000/api/ai/cv/generate
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+Accept: application/json
+
+{
+    "include_new_skills": true
+}
+
+### 4.2 توليد CV بدون المهارات الجديدة
+POST http://127.0.0.1:8000/api/ai/cv/generate
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+Accept: application/json
+
+{
+    "include_new_skills": false
+}
+
+### ============================================
+### ملاحظات مهمة:
+### ============================================
+### 
+### 1. استبدل YOUR_TOKEN_HERE بالـ token الذي تحصل عليه من تسجيل الدخول
+### 
+### 2. سير العمل الصحيح:
+###    أ. تحليل CV (gap-analysis) → يحفظ في user_resumes
+###    ب. توليد Roadmap → يحفظ في user_roadmaps
+###    ج. توليد كويز → يحفظ في user_quizzes
+###    د. تقديم الكويز → إذا نجح (70%+)، يضيف المهارات إلى completed_skills
+###    هـ. توليد ATS CV → يجلب تلقائياً:
+###       - آخر CV من user_resumes
+###       - المهارات المكتسبة من user_roadmaps.completed_skills
+###       - يدمجهم ويولد CV احترافي
+### 
+### 3. التغييرات الرئيسية:
+###    - ✅ تحسين تحليل CV والمعلومات اليدوية
+###    - ✅ إضافة endpoint لتقديم الكويز
+###    - ✅ تحديث توليد ATS CV ليجلب البيانات تلقائياً
+###    - ✅ ربط المهارات المكتسبة من الكويز بـ ATS CV
+### 
+### 4. للاختبار الكامل:
+###    - قم بتسجيل الدخول أولاً
+###    - قم بتحليل CV
+###    - قم بتوليد Roadmap
+###    - قم بتوليد كويز
+###    - قم بتقديم الكويز (احرص على النجاح 70%+)
+###    - قم بتوليد ATS CV (سيتضمن المهارات الجديدة تلقائياً)
+###

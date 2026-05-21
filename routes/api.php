@@ -54,6 +54,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // 6: توليد كويز اختباري
         Route::post('/career/quiz', [AiController::class, 'generateQuiz']);
+        Route::post('/career/quiz/submit', [AiController::class, 'submitQuiz']);
 
         // 2: توليد CV احترافي (ATS)
         Route::post('/cv/generate', [AiController::class, 'generateAtsCv']);

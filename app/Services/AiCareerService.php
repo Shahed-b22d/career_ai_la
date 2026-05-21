@@ -79,20 +79,35 @@ class AiCareerService
     }
 
     /**
-     * 1. قراءة الـ CV باستخدام Spatie/pdf-to-text
+     * 1. قراءة الـ CV باستخدام PDF Parser
      */
-        public function readCv(string $pdfFilePath): string
+    public function readCv(string $pdfFilePath): string
     {
         if (!file_exists($pdfFilePath)) {
             throw new Exception("The uploaded CV file was not found.");
         }
 
-        // استخدام مكتبة Smalot بدلاً من Spatie
-        $parser = new \Smalot\PdfParser\Parser();
-        $pdf = $parser->parseFile($pdfFilePath);
-        $text = $pdf->getText();
-        
-        return $text;
+        try {
+            // استخدام مكتبة Smalot لاستخراج النص من PDF
+            $parser = new \Smalot\PdfParser\Parser();
+            $pdf = $parser->parseFile($pdfFilePath);
+            $text = $pdf->getText();
+            
+            // تنظيف النص من الأحرف الغريبة والمسافات الزائدة
+            $text = preg_replace('/\s+/', ' ', $text);
+            $text = trim($text);
+            
+            if (empty($text)) {
+                throw new Exception("Could not extract text from PDF. The file might be image-based or corrupted.");
+            }
+            
+            Log::info("DEBUG: CV Text Extracted Successfully. Length: " . strlen($text));
+            return $text;
+            
+        } catch (\Exception $e) {
+            Log::error("PDF Reading Error: " . $e->getMessage());
+            throw new Exception("Failed to read CV file: " . $e->getMessage());
+        }
     }
 
 
@@ -101,38 +116,58 @@ class AiCareerService
      */
     public function analyzeGap(string $cvText, string $targetJob): array
     {
-        $systemInstruction = "Format your output strictly as a raw JSON object (No markdown wrappers like ```json, no explanations outside the JSON).
+        $systemInstruction = "You are a Career Analysis Expert. Analyze the user's CV/information and compare it with the target job requirements.
+Format your output strictly as a raw JSON object (No markdown wrappers like ```json, no explanations outside the JSON).
 Schema:
 {
-  \"current_skills\": [\"list of EXISTING skills (CONCISE, 1-3 words each)\"],
-  \"missing_skills\": [\"list of MISSING skills (CONCISE, 1-3 words each)\"],
+  \"current_skills\": [\"list of EXISTING skills found in CV (CONCISE, 1-3 words each)\"],
+  \"missing_skills\": [\"list of MISSING skills needed for target job (CONCISE, 1-3 words each)\"],
   \"panel_feedback\": \"A concise, encouraging summary from the Career Advisor.\"
 }";
         
         $prompt = "Target Job Role: {$targetJob}
 
-User's CV text:
+User's CV/Information:
 ---
 {$cvText}
 ---
 
 Instructions:
-1. Extract 'current_skills' and 'missing_skills' using standard terms.
-2. KEEP SKILL NAMES SHORT (e.g., 'Flutter' instead of 'Complex App Architecture').
-3. Return ONLY the JSON.";
+1. Carefully analyze the CV/information text above.
+2. Extract 'current_skills' that the user ALREADY HAS based on their experience, education, and mentioned skills.
+3. Identify 'missing_skills' that are required for the '{$targetJob}' role but NOT present in the user's CV.
+4. KEEP SKILL NAMES SHORT and SPECIFIC (e.g., 'Flutter', 'React', 'Python', 'SQL', 'Git').
+5. Provide encouraging feedback in 'panel_feedback'.
+6. Return ONLY the JSON object, no other text.";
 
-        Log::info("DEBUG: Calling Gemini for Analysis...");
+        Log::info("DEBUG: Calling Gemini for Gap Analysis...");
+        Log::info("DEBUG: CV Text Length: " . strlen($cvText));
+        Log::info("DEBUG: Target Job: " . $targetJob);
+        
         $response = $this->callGemini($prompt, $systemInstruction);
         Log::info("DEBUG: Gemini Raw Response: " . $response);
         
         // استخراج الـ JSON فقط من بين الأقواس المجعدة { ... }
+        $cleanResponse = $response;
         if (preg_match('/\{.*\}/s', $response, $matches)) {
-            $response = $matches[0];
+            $cleanResponse = $matches[0];
         }
-
-        $parsed = json_decode($response, true);
         
-        return $parsed ?: ['current_skills' => [], 'missing_skills' => []];
+        // إزالة أي markdown wrappers
+        $cleanResponse = preg_replace('/```json\s*|\s*```/', '', $cleanResponse);
+        $cleanResponse = trim($cleanResponse);
+
+        Log::info("DEBUG: Clean JSON Response: " . $cleanResponse);
+        
+        $parsed = json_decode($cleanResponse, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error("JSON Decode Error: " . json_last_error_msg());
+            Log::error("Failed Response: " . $cleanResponse);
+            throw new Exception("Failed to parse AI response: " . json_last_error_msg());
+        }
+        
+        return $parsed ?: ['current_skills' => [], 'missing_skills' => [], 'panel_feedback' => ''];
     }
 
     /**
@@ -246,18 +281,35 @@ Schema:
 }";
         $skillsStr = implode(", ", $skillsToTest);
         $prompt = "Create a 5-question multiple-choice quiz about: {$skillsStr}. 
-Each question must have 4 options and one 'correct_answer' (matching one of the options). 
-Return ONLY raw JSON.";
+Each question must have 4 options (labeled A, B, C, D) and one 'correct_answer' (matching one of the options exactly). 
+Make questions practical and scenario-based when possible.
+Return ONLY raw JSON, no other text.";
 
+        Log::info("DEBUG: Calling Gemini for Quiz Generation...");
+        Log::info("DEBUG: Skills to Test: " . $skillsStr);
+        
         $response = $this->callGemini($prompt, $systemInstruction);
-        Log::info("Gemini Quiz Response: " . $response);
+        Log::info("DEBUG: Gemini Quiz Raw Response: " . $response);
         
         // استخراج الـ JSON فقط من بين الأقواس المجعدة { ... }
+        $cleanResponse = $response;
         if (preg_match('/\{.*\}/s', $response, $matches)) {
-            $response = $matches[0];
+            $cleanResponse = $matches[0];
         }
+        
+        // إزالة أي markdown wrappers
+        $cleanResponse = preg_replace('/```json\s*|\s*```/', '', $cleanResponse);
+        $cleanResponse = trim($cleanResponse);
 
-        $parsed = json_decode($response, true);
+        Log::info("DEBUG: Clean Quiz JSON: " . $cleanResponse);
+
+        $parsed = json_decode($cleanResponse, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error("JSON Decode Error in Quiz: " . json_last_error_msg());
+            Log::error("Failed Response: " . $cleanResponse);
+            throw new Exception("Failed to parse quiz response: " . json_last_error_msg());
+        }
         
         return $parsed ?: ['quiz' => []];
     }
@@ -265,7 +317,7 @@ Return ONLY raw JSON.";
     /**
      * 2. توليد CV احترافي بنظام ATS
      */
-    public function generateAtsCv(string $userDataText, array $newSkills, string $personalInfo = ""): string
+    public function generateAtsCv(string $userDataText, array $allSkills, string $personalInfo = ""): string
     {
         $systemInstruction = "You are a 'Hiring Panel & Career Advisory Board' consisting of 4 distinct personas:
 1. ATS & HR Specialist (Focuses on strict ATS compatibility, semantic structure, and keyword density)
@@ -273,36 +325,46 @@ Return ONLY raw JSON.";
 3. Hiring Manager (Focuses on emphasizing business impact, leadership, and value)
 4. Career Advisor (Ensures the overall tone is professional, confident, and authentic)
 
-Your task is to collaboratively rewrite the user's CV data into a pristine, highly-optimized ATS-friendly HTML format, incorporating their newly mastered skills.
+Your task is to collaboratively rewrite the user's CV data into a pristine, highly-optimized ATS-friendly HTML format.
 Rules:
 1. Output ONLY valid, clean HTML code (No markdown like ```html).
 2. DO NOT use complex CSS, tables, columns, graphics, or ANY colors (strict black and white semantic text only).
 3. The layout MUST include: Contact Info (Header), Professional Summary, Core Competencies (Skills), Professional Experience, and Education.
-4. The HR ensures the format is ATS-friendly. The Tech Lead ensures technical skills are prominent. The Hiring Manager ensures impact is highlighted. The Career Advisor finalizes the professional tone.";
+4. The HR ensures the format is ATS-friendly. The Tech Lead ensures technical skills are prominent. The Hiring Manager ensures impact is highlighted. The Career Advisor finalizes the professional tone.
+5. Use simple HTML tags: <h1>, <h2>, <h3>, <p>, <ul>, <li>, <strong>, <em> only.
+6. Ensure proper spacing and readability for ATS parsers.";
         
-        $skillsStr = implode(", ", $newSkills);
-        $prompt = "User's Personal Information (MUST be used in the header of the CV exactly as provided, overriding any old contact info in the original text):
+        $skillsStr = implode(", ", $allSkills);
+        $prompt = "User's Personal Information (MUST be used in the header of the CV exactly as provided):
 ---
 {$personalInfo}
 ---
 
-User's Original Information/CV:
+User's Original CV/Information:
 ---
 {$userDataText}
 ---
 
-NEWLY Mastered Skills: {$skillsStr}.
+User's Complete Skill Set (including newly mastered skills): {$skillsStr}
 
 Instructions:
-1. HR Specialist Step: Organize the structure for flawless ATS parsing.
-2. Tech Lead Step: Integrate the 'NEWLY Mastered Skills' naturally and highlight technical achievements.
-3. Hiring Manager Step: Elevate the professional tone using strong action verbs to show business impact.
-4. Career Advisor Step: Finalize the CV to ensure it accurately and impressively represents the candidate.
-Return ONLY the clean HTML code.";
+1. HR Specialist Step: Organize the structure for flawless ATS parsing using simple semantic HTML.
+2. Tech Lead Step: Integrate ALL skills from the skill set naturally into a 'Core Competencies' or 'Technical Skills' section. Highlight technical achievements from the original CV.
+3. Hiring Manager Step: Elevate the professional tone using strong action verbs to show business impact in the experience section.
+4. Career Advisor Step: Finalize the CV to ensure it accurately and impressively represents the candidate. Make sure the CV flows naturally and professionally.
+5. Use the personal information provided for the contact header, replacing any old contact info in the original text.
+6. Return ONLY the clean HTML code with no markdown wrappers.";
 
-        $response = $this->callGemini($prompt, $systemInstruction);
-        $htmlCv = preg_replace('/```html|```/', '', $response);
+        Log::info("DEBUG: Generating ATS CV with " . count($allSkills) . " skills");
         
-        return trim($htmlCv);
+        $response = $this->callGemini($prompt, $systemInstruction);
+        
+        // إزالة أي markdown wrappers
+        $htmlCv = preg_replace('/```html\s*|\s*```/', '', $response);
+        $htmlCv = trim($htmlCv);
+        
+        Log::info("DEBUG: ATS CV Generated Successfully");
+        
+        return $htmlCv;
     }
 }
