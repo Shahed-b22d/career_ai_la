@@ -14,6 +14,8 @@ class Company extends Model
         'phone',
         'business_type',
         'commercial_register_path',
+        'description',
+        'verification_status',
     ];
 
     public function user()

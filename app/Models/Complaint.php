@@ -15,6 +15,12 @@ class Complaint extends Model
         'subject',
         'message',
         'status',
+        'admin_response',
+        'resolved_at',
+    ];
+
+    protected $casts = [
+        'resolved_at' => 'datetime',
     ];
 
     public function user()

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Job;
+use App\Models\User;
+use App\Services\FcmService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -113,10 +115,20 @@ class JobController extends Controller
     public function paymentSuccess(Request $request)
     {
         $jobId = $request->query('job_id');
-        $job = Job::find($jobId);
+        $job = Job::with('user')->find($jobId);
 
         if ($job) {
             $job->update(['is_paid' => true]);
+
+            // 🔔 Notify the company that their job post is now live
+            if ($job->user && $job->user->fcm_token) {
+                (new FcmService())->send(
+                    $job->user->fcm_token,
+                    '🎉 Job Post Approved!',
+                    "Your job post \"{$job->title}\" is now live and visible to candidates.",
+                    ['type' => 'job_approved', 'job_id' => (string) $job->id]
+                );
+            }
         }
 
         return response()->make("
@@ -487,6 +499,28 @@ class JobController extends Controller
 
         // Sort by match score descending
         usort($candidates, fn($a, $b) => intval($b['match']) <=> intval($a['match']));
+
+        // 🔔 Notify top candidates that a company viewed their profile
+        $companyName = $user->name;
+        $topTokens = \App\Models\UserResume::with('user')
+            ->whereHas('user', function ($q) {
+                $q->where('role', 'job')->whereNotNull('fcm_token');
+            })
+            ->latest()
+            ->take(5)
+            ->get();
+
+        $fcm = new FcmService();
+        foreach ($topTokens as $resume) {
+            if ($resume->user && $resume->user->fcm_token) {
+                $fcm->send(
+                    $resume->user->fcm_token,
+                    '🌟 You\'ve Been Shortlisted!',
+                    "{$companyName} is reviewing your profile. Keep your CV updated to stand out!",
+                    ['type' => 'shortlisted', 'company' => $companyName]
+                );
+            }
+        }
 
         return response()->json([
             'success' => true,

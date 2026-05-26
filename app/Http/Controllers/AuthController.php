@@ -136,6 +136,16 @@ class AuthController extends Controller
     }
 
     /**
+     * POST /api/auth/fcm-token — save or update FCM device token
+     */
+    public function updateFcmToken(Request $request)
+    {
+        $request->validate(['fcm_token' => 'required|string']);
+        $request->user()->update(['fcm_token' => $request->fcm_token]);
+        return response()->json(['message' => 'FCM token updated']);
+    }
+
+    /**
      * Logout authenticated user
      */
     public function logout(Request $request)
@@ -225,6 +235,47 @@ class AuthController extends Controller
             'message' => 'Profile updated successfully',
             'user'    => $user,
         ], 200);
+    }
+
+    /**
+     * GET /reset-password — show the reset form (web page opened from email link)
+     */
+    public function showResetForm(\Illuminate\Http\Request $request)
+    {
+        return view('auth.reset-password', [
+            'token' => $request->query('token'),
+            'email' => $request->query('email'),
+        ]);
+    }
+
+    /**
+     * POST /reset-password — handle form submission from the web page
+     */
+    public function handleResetForm(\Illuminate\Http\Request $request)
+    {
+        $request->validate([
+            'token'                 => 'required',
+            'email'                 => 'required|email',
+            'password'              => 'required|min:6|confirmed',
+            'password_confirmation' => 'required',
+        ]);
+
+        $status = Password::reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function (User $user, string $password) {
+                $user->forceFill([
+                    'password' => Hash::make($password),
+                ])->setRememberToken(Str::random(60));
+                $user->save();
+                event(new PasswordReset($user));
+            }
+        );
+
+        if ($status === Password::PASSWORD_RESET) {
+            return view('auth.reset-success');
+        }
+
+        return back()->withErrors(['email' => __($status)])->withInput($request->only('email'));
     }
 
     /**
