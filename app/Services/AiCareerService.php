@@ -367,4 +367,56 @@ Instructions:
         
         return $htmlCv;
     }
+
+    /**
+     * وظيفة لترشيح أفضل المرشحين بناءً على وصف وظيفة معين من قبل الشركة
+     */
+    public function rankCandidatesForCompany(string $jobDescription, array $candidatesResumes): array
+    {
+        $systemInstruction = "You are a Senior Technical Recruiter. Your task is to evaluate a list of candidates against a specific job description.
+Analyze their current skills and experience. Output strictly as a JSON array of objects.
+Schema:
+[
+  {
+    \"resume_id\": \"id of the resume\",
+    \"match_score\": \"percentage (0-100)\",
+    \"justification\": \"short 1-sentence reason for this score\"
+  }
+]";
+
+        // تحويل بيانات المرشحين إلى نص مبسط ليتمكن الذكاء الاصطناعي من تحليله بسرعة
+        $candidatesData = array_map(function($item) {
+            return [
+                'resume_id' => $item['id'],
+                'job_target' => $item['target_job'],
+                'skills' => $item['current_skills'],
+                'summary' => substr($item['original_text'], 0, 500) // نرسل جزء من النص لتوفير الـ tokens
+            ];
+        }, $candidatesResumes);
+
+        $prompt = "Job Description: {$jobDescription}
+
+List of Candidates:
+" . json_encode($candidatesData) . "
+
+Instructions:
+1. Compare each candidate with the job description.
+2. Calculate a 'match_score' based on skill overlap and experience.
+3. Provide a brief 'justification'.
+4. Return ONLY the JSON array.";
+
+        Log::info("DEBUG: Ranking " . count($candidatesResumes) . " candidates for a job.");
+
+        try {
+            $response = $this->callGemini($prompt, $systemInstruction);
+            if (preg_match('/\[.*\]/s', $response, $matches)) {
+                $response = $matches[0];
+            }
+            $rankedData = json_decode($response, true);
+            return $rankedData ?: [];
+        } catch (Exception $e) {
+            Log::error("Error in ranking candidates: " . $e->getMessage());
+            return [];
+        }
+    }
 }
