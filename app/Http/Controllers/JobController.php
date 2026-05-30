@@ -3,8 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Job;
+use App\Models\JobCandidateScore;
 use App\Models\User;
 use App\Models\UserResume;
+use App\Services\AiCareerService;
+use App\Services\CandidateScoringService;
+use App\Services\FcmService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -12,6 +16,14 @@ use Illuminate\Support\Facades\Log;
 
 class JobController extends Controller
 {
+    protected AiCareerService $aiService;
+    protected CandidateScoringService $scoringService;
+
+    public function __construct(AiCareerService $aiService, CandidateScoringService $scoringService)
+    {
+        $this->aiService      = $aiService;
+        $this->scoringService = $scoringService;
+    }
     /**
      * Create a job and return Stripe Checkout URL
      */
@@ -120,6 +132,13 @@ class JobController extends Controller
 
         if ($job) {
             $job->update(['is_paid' => true]);
+
+            // ── حساب نسبة التوافق مع كل المرشحين وحفظها في DB ────────────────
+            try {
+                $this->scoringService->scoreAllCandidatesForJob($job);
+            } catch (\Exception $e) {
+                Log::error("Scoring after job activation failed: " . $e->getMessage());
+            }
 
             // 🔔 Notify the company that their job post is now live
             if ($job->user && $job->user->fcm_token) {
@@ -296,7 +315,8 @@ class JobController extends Controller
     }
 
     /**
-     * Build candidate payload from a job seeker resume + company jobs.
+     * Build candidate payload — يقرأ النسبة من DB (محسوبة مسبقاً بالـ AI).
+     * إذا لم تُحسب بعد يستخدم الـ local fallback.
      */
     private function buildCandidatePayload(UserResume $resume, Collection $companyJobs): ?array
     {
@@ -304,13 +324,13 @@ class JobController extends Controller
             return null;
         }
 
-        $bestMatchScore = $this->calculateMatchScore($resume, $companyJobs);
+        $matchScore = $this->getBestStoredScore($resume->user_id, $companyJobs);
 
         return [
             'user_id'        => $resume->user->id,
             'name'           => $resume->user->name,
-            'role'           => $resume->target_job ?? 'Developer',
-            'match'          => "{$bestMatchScore}%",
+            'role'           => $resume->target_job ?? 'Job Seeker',
+            'match'          => "{$matchScore}%",
             'email'          => $resume->user->email,
             'phone'          => $resume->user->phone ?? 'N/A',
             'governorate'    => $resume->user->governorate ?? 'N/A',
@@ -322,36 +342,103 @@ class JobController extends Controller
     }
 
     /**
-     * Calculate AI match score for a resume against company jobs.
+     * يجلب أعلى نسبة مخزونة في DB لهذا المرشح مقابل وظائف الشركة.
+     * إذا لم توجد نسبة محسوبة بعد → يحسب محلياً ويحفظ.
      */
-    private function calculateMatchScore(UserResume $resume, Collection $companyJobs): int
+    private function getBestStoredScore(int $candidateUserId, Collection $companyJobs): int
     {
-        $bestMatchScore = 70;
+        if ($companyJobs->isEmpty()) {
+            // لا توجد وظائف → نقيّم جودة الـ profile
+            $resume = UserResume::where('user_id', $candidateUserId)->latest()->first();
+            return $resume ? $this->scoreWithoutJob($resume) : 0;
+        }
 
+        $jobIds = $companyJobs->pluck('id');
+
+        // جلب أعلى نسبة مخزونة
+        $best = JobCandidateScore::where('candidate_user_id', $candidateUserId)
+            ->whereIn('job_id', $jobIds)
+            ->max('match_score');
+
+        if ($best !== null) {
+            return (int) $best;
+        }
+
+        // لم تُحسب بعد → نحسب محلياً كـ fallback مؤقت
+        $resume = UserResume::where('user_id', $candidateUserId)->latest()->first();
+        if (!$resume) {
+            return 0;
+        }
+
+        $bestLocal = 0;
         foreach ($companyJobs as $job) {
-            $targetJob = $resume->target_job ?? '';
+            $bestLocal = max($bestLocal, $this->computeScoreForJob($resume, $job));
+        }
+        return $bestLocal;
+    }
 
-            if (
-                $targetJob !== '' &&
-                (stripos($job->title, $targetJob) !== false || stripos($targetJob, $job->title) !== false)
-            ) {
-                $bestMatchScore = max($bestMatchScore, 95);
+    /**
+     * حساب النسبة عندما لا توجد وظائف نشطة للشركة.
+     */
+    private function scoreWithoutJob(UserResume $resume): int
+    {
+        $score = 0;
+        if (!empty($resume->original_text))      { $score += 30; }
+        if (!empty($resume->target_job))          { $score += 20; }
+        $score += min(count($resume->current_skills ?? []) * 5, 50);
+        return min($score, 100);
+    }
+
+    /**
+     * حساب محلي احتياطي لوظيفة واحدة (يُستخدم فقط إذا لم تُحسب النسبة بعد).
+     */
+    private function computeScoreForJob(UserResume $resume, Job $job): int
+    {
+        $jobText         = strtolower($job->requirements . ' ' . $job->description . ' ' . $job->title);
+        $candidateSkills = array_map('strtolower', $resume->current_skills ?? []);
+        $totalSkills     = max(count($candidateSkills), 1);
+
+        $matched = 0;
+        foreach ($candidateSkills as $skill) {
+            if (str_contains($jobText, $skill)) {
+                $matched++;
             } else {
-                $overlap = array_intersect(
-                    array_map('strtolower', $resume->current_skills ?? []),
-                    array_map('strtolower', explode(' ', $job->requirements . ' ' . $job->description))
-                );
-                if (count($overlap) > 0) {
-                    $bestMatchScore = max($bestMatchScore, min(70 + count($overlap) * 5, 94));
+                foreach (explode(' ', $skill) as $part) {
+                    if (strlen($part) > 2 && str_contains($jobText, $part)) {
+                        $matched += 0.5;
+                        break;
+                    }
+                }
+            }
+        }
+        $skillScore = (int) round(($matched / $totalSkills) * 50);
+
+        $candidateRole = strtolower(trim($resume->target_job ?? ''));
+        $jobTitle      = strtolower(trim($job->title));
+        $titleScore    = 0;
+        if ($candidateRole !== '' && $jobTitle !== '') {
+            if ($candidateRole === $jobTitle) {
+                $titleScore = 25;
+            } elseif (str_contains($jobTitle, $candidateRole) || str_contains($candidateRole, $jobTitle)) {
+                $titleScore = 18;
+            } else {
+                $common = array_intersect(explode(' ', $candidateRole), explode(' ', $jobTitle));
+                if ($common) {
+                    $titleScore = (int) round(
+                        (count($common) / max(count(explode(' ', $candidateRole)), count(explode(' ', $jobTitle)))) * 15
+                    );
                 }
             }
         }
 
-        if ($companyJobs->isEmpty()) {
-            $bestMatchScore = rand(85, 98);
+        $profileScore = 0;
+        if (!empty($resume->original_text)) {
+            $profileScore += 15;
+            if (strlen($resume->original_text) > 500) { $profileScore += 5; }
         }
+        if (count($candidateSkills) >= 5) { $profileScore += 5; }
 
-        return $bestMatchScore;
+        return min(max($skillScore + $titleScore + $profileScore, 0), 100);
     }
 
     /**
@@ -415,21 +502,19 @@ class JobController extends Controller
             
         $recentJobs = [];
         foreach ($recentJobsRaw as $job) {
-            // Count actual matching resumes
-            $matchCount = \App\Models\UserResume::where('target_job', 'LIKE', "%{$job->title}%")->count();
-            if ($matchCount == 0) {
-                // Default fallback match count to look nice
-                $matchCount = rand(5, 15);
-            }
-            
+            // عدد المرشحين الذين نسبتهم مع هذه الوظيفة ≥ 50% (محسوبة بالـ AI)
+            $matchCount = JobCandidateScore::where('job_id', $job->id)
+                ->where('match_score', '>=', 50)
+                ->count();
+
             $recentJobs[] = [
-                'id' => $job->id,
-                'title' => $job->title,
-                'created_at' => $job->created_at->toIso8601String(),
-                'is_paid' => $job->is_paid,
-                'salary' => $job->salary,
-                'location' => $job->location,
-                'job_type' => $job->job_type,
+                'id'            => $job->id,
+                'title'         => $job->title,
+                'created_at'    => $job->created_at->toIso8601String(),
+                'is_paid'       => $job->is_paid,
+                'salary'        => $job->salary,
+                'location'      => $job->location,
+                'job_type'      => $job->job_type,
                 'matches_count' => "{$matchCount} AI Matches",
             ];
         }
@@ -511,9 +596,19 @@ class JobController extends Controller
             ?? optional($candidate->jobSeeker)->phone
             ?? 'N/A';
 
-        $matchScore = $resume
-            ? $this->calculateMatchScore($resume, $companyJobs)
-            : 70;
+        $matchScore = 0;
+        if ($resume) {
+            if ($companyJobs->isNotEmpty()) {
+                $stored = JobCandidateScore::where('candidate_user_id', $candidate->id)
+                    ->whereIn('job_id', $companyJobs->pluck('id'))
+                    ->max('match_score');
+                $matchScore = $stored !== null
+                    ? (int) $stored
+                    : $this->computeScoreForJob($resume, $companyJobs->first());
+            } else {
+                $matchScore = $this->scoreWithoutJob($resume);
+            }
+        }
 
         return response()->json([
             'success' => true,

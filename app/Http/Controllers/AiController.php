@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Services\AiCareerService;
+use App\Services\CandidateScoringService;
 use App\Models\UserResume;
 use App\Models\UserRoadmap;
 use App\Models\UserQuiz;
@@ -13,11 +14,13 @@ use Illuminate\Support\Facades\Log;
 class AiController extends Controller
 {
     protected AiCareerService $aiService;
+    protected CandidateScoringService $scoringService;
 
-    public function __construct(AiCareerService $aiService)
+    public function __construct(AiCareerService $aiService, CandidateScoringService $scoringService)
     {
-        set_time_limit(120); // زيادة وقت التنفيذ ليناسب استجابات الذكاء الاصطناعي
-        $this->aiService = $aiService;
+        set_time_limit(120);
+        $this->aiService      = $aiService;
+        $this->scoringService = $scoringService;
     }
 
     /**
@@ -51,12 +54,19 @@ class AiController extends Controller
 
             // حفظ البيانات في قاعدة البيانات
             $resume = UserResume::create([
-                'user_id' => auth()->id(), // null if not authenticated
+                'user_id' => auth()->id(),
                 'target_job' => $request->input('target_job'),
                 'original_text' => $cvText,
                 'current_skills' => $analysisResult['current_skills'] ?? [],
                 'missing_skills' => $analysisResult['missing_skills'] ?? [],
             ]);
+
+            // ── حساب نسبة التوافق مع كل الوظائف النشطة وحفظها في DB ──────────
+            try {
+                $this->scoringService->scoreAllJobsForCandidate($resume);
+            } catch (\Exception $e) {
+                Log::error("Scoring after CV upload failed: " . $e->getMessage());
+            }
 
             return response()->json([
                 'success' => true,

@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\UserQuiz;
 use App\Models\UserResume;
 use App\Models\UserRoadmap;
+use App\Services\CandidateScoringService;
 use App\Services\FcmService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -223,6 +224,13 @@ class AdminController extends Controller
     public function confirmPayment(Job $job)
     {
         $job->update(['is_paid' => true]);
+
+        // ── حساب نسبة التوافق مع كل المرشحين وحفظها في DB ────────────────────
+        try {
+            app(CandidateScoringService::class)->scoreAllCandidatesForJob($job);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("Admin confirmPayment scoring failed: " . $e->getMessage());
+        }
 
         // 🔔 Notify the company that their job post is now live
         $job->load('user');

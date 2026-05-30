@@ -419,4 +419,81 @@ Instructions:
             return [];
         }
     }
+
+    /**
+     * حساب نسبة التوافق الحقيقية بين مرشح واحد ووظيفة واحدة باستخدام Gemini AI.
+     *
+     * يُرجع مصفوفة تحتوي على:
+     *   - match_score  : int  (0-100)
+     *   - justification: string (جملة واحدة تشرح السبب)
+     *
+     * معايير التقييم التي يستخدمها الـ AI (مجموعها 100):
+     *   - تطابق المهارات مع متطلبات الوظيفة  (50 نقطة)
+     *   - تطابق المسمى الوظيفي               (25 نقطة)
+     *   - الخبرة والسياق من نص الـ CV         (25 نقطة)
+     */
+    public function scoreOneCandidate(
+        string $jobTitle,
+        string $jobDescription,
+        string $jobRequirements,
+        array  $candidateSkills,
+        string $candidateTargetJob,
+        string $candidateCvText = ''
+    ): array {
+        $systemInstruction = "You are a Senior Technical Recruiter and ATS Specialist.
+Evaluate how well a candidate matches a specific job posting.
+Scoring breakdown (total = 100 points):
+  - Skills match (50 pts): Count how many of the job's required skills the candidate already has.
+  - Target job alignment (25 pts): Does the candidate's desired job title match the posted job title?
+  - Experience & context (25 pts): Based on the CV text, does the candidate have relevant experience?
+
+Output ONLY a raw JSON object — no markdown, no explanation outside JSON.
+Schema: {\"match_score\": <integer 0-100>, \"justification\": \"<one sentence>\"}";
+
+        $skillsList = implode(', ', $candidateSkills) ?: 'No skills listed';
+        $cvSnippet  = $candidateCvText !== ''
+            ? substr($candidateCvText, 0, 800)
+            : 'No CV text available.';
+
+        $prompt = "JOB POSTING:
+Title: {$jobTitle}
+Requirements: {$jobRequirements}
+Description: {$jobDescription}
+
+CANDIDATE PROFILE:
+Desired Job Title: {$candidateTargetJob}
+Skills: {$skillsList}
+CV Summary: {$cvSnippet}
+
+Return ONLY the JSON object:";
+
+        try {
+            $raw = trim($this->callGemini($prompt, $systemInstruction));
+
+            // استخراج JSON من الرد
+            if (preg_match('/\{.*\}/s', $raw, $m)) {
+                $raw = $m[0];
+            }
+            $raw = preg_replace('/```json\s*|\s*```/', '', $raw);
+
+            $data = json_decode(trim($raw), true);
+
+            if (json_last_error() === JSON_ERROR_NONE && isset($data['match_score'])) {
+                return [
+                    'match_score'   => max(0, min(100, (int) $data['match_score'])),
+                    'justification' => $data['justification'] ?? '',
+                ];
+            }
+
+            // إذا فشل الـ JSON، نحاول استخراج رقم فقط
+            preg_match('/\d+/', $raw, $nm);
+            $score = isset($nm[0]) ? max(0, min(100, (int) $nm[0])) : 0;
+            return ['match_score' => $score, 'justification' => ''];
+
+        } catch (Exception $e) {
+            Log::error("AI scoreOneCandidate error: " . $e->getMessage());
+            // نرجع -1 لتمييز فشل الـ AI عن نسبة صفر حقيقية
+            return ['match_score' => -1, 'justification' => ''];
+        }
+    }
 }
