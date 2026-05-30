@@ -4,8 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Job;
 use App\Models\User;
-use App\Services\FcmService;
+use App\Models\UserResume;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -295,6 +296,80 @@ class JobController extends Controller
     }
 
     /**
+     * Build candidate payload from a job seeker resume + company jobs.
+     */
+    private function buildCandidatePayload(UserResume $resume, Collection $companyJobs): ?array
+    {
+        if (!$resume->user || $resume->user->role !== 'job') {
+            return null;
+        }
+
+        $bestMatchScore = $this->calculateMatchScore($resume, $companyJobs);
+
+        return [
+            'user_id'        => $resume->user->id,
+            'name'           => $resume->user->name,
+            'role'           => $resume->target_job ?? 'Developer',
+            'match'          => "{$bestMatchScore}%",
+            'email'          => $resume->user->email,
+            'phone'          => $resume->user->phone ?? 'N/A',
+            'governorate'    => $resume->user->governorate ?? 'N/A',
+            'skills'         => $resume->current_skills ?? [],
+            'missing_skills' => $resume->missing_skills ?? [],
+            'target_job'     => $resume->target_job,
+            'has_cv'         => !empty($resume->original_text),
+        ];
+    }
+
+    /**
+     * Calculate AI match score for a resume against company jobs.
+     */
+    private function calculateMatchScore(UserResume $resume, Collection $companyJobs): int
+    {
+        $bestMatchScore = 70;
+
+        foreach ($companyJobs as $job) {
+            $targetJob = $resume->target_job ?? '';
+
+            if (
+                $targetJob !== '' &&
+                (stripos($job->title, $targetJob) !== false || stripos($targetJob, $job->title) !== false)
+            ) {
+                $bestMatchScore = max($bestMatchScore, 95);
+            } else {
+                $overlap = array_intersect(
+                    array_map('strtolower', $resume->current_skills ?? []),
+                    array_map('strtolower', explode(' ', $job->requirements . ' ' . $job->description))
+                );
+                if (count($overlap) > 0) {
+                    $bestMatchScore = max($bestMatchScore, min(70 + count($overlap) * 5, 94));
+                }
+            }
+        }
+
+        if ($companyJobs->isEmpty()) {
+            $bestMatchScore = rand(85, 98);
+        }
+
+        return $bestMatchScore;
+    }
+
+    /**
+     * Get job seeker resumes for candidate listings.
+     */
+    private function getJobSeekerResumes()
+    {
+        return UserResume::with('user')
+            ->whereHas('user', function ($q) {
+                $q->where('role', 'job');
+            })
+            ->latest()
+            ->get()
+            ->unique('user_id')
+            ->values();
+    }
+
+    /**
      * Get Company Dashboard details dynamically
      */
     public function getCompanyDashboardData()
@@ -308,92 +383,27 @@ class JobController extends Controller
             
         $stripeSpend = $activeJobsCount * 25;
         
-        // Total suggested candidates (all job seekers who uploaded resumes)
-        $suggestedCandidatesCount = \App\Models\UserResume::distinct('user_id')->count();
+        // Total suggested candidates (job seekers with CV or manual profile data)
+        $suggestedCandidatesCount = UserResume::whereHas('user', function ($q) {
+            $q->where('role', 'job');
+        })->distinct('user_id')->count('user_id');
         
         // Load the company's active jobs to perform AI matching
         $companyJobs = Job::where('user_id', $user->id)
             ->where('is_paid', true)
             ->get();
-            
-        // Get all resumes with their user information
-        $resumes = \App\Models\UserResume::with('user')
-            ->whereHas('user', function($q) {
-                $q->where('role', 'seeker');
-            })
-            ->latest()
-            ->get();
-            
+
         $topCandidates = [];
-        
-        foreach ($resumes as $resume) {
-            if (!$resume->user) continue;
-            
-            // Calculate matching score against company's jobs
-            $bestMatchScore = 70; // baseline
-            $matchedJobTitle = $resume->target_job ?? 'Software Developer';
-            
-            foreach ($companyJobs as $job) {
-                // If the target job title is similar to the company job title
-                if (stripos($job->title, $resume->target_job) !== false || stripos($resume->target_job, $job->title) !== false) {
-                    $bestMatchScore = max($bestMatchScore, 95);
-                    $matchedJobTitle = $job->title;
-                } else {
-                    // Check skill overlap
-                    $overlap = array_intersect(
-                        array_map('strtolower', $resume->current_skills ?? []), 
-                        array_map('strtolower', explode(' ', $job->requirements . ' ' . $job->description))
-                    );
-                    if (count($overlap) > 0) {
-                        $bestMatchScore = max($bestMatchScore, min(70 + count($overlap) * 5, 94));
-                    }
-                }
+
+        foreach ($this->getJobSeekerResumes() as $resume) {
+            $payload = $this->buildCandidatePayload($resume, $companyJobs);
+            if ($payload) {
+                $topCandidates[] = $payload;
             }
-            
-            // If the company has no jobs, assign high default scores for general recommendation
-            if ($companyJobs->isEmpty()) {
-                $bestMatchScore = rand(85, 98);
-            }
-            
-            $topCandidates[] = [
-                'name' => $resume->user->name,
-                'role' => $resume->target_job ?? 'Developer',
-                'match' => "{$bestMatchScore}%",
-                'email' => $resume->user->email,
-                'phone' => $resume->user->phone ?? 'N/A',
-                'governorate' => $resume->user->governorate ?? 'N/A',
-                'skills' => $resume->current_skills ?? [],
-                'missing_skills' => $resume->missing_skills ?? [],
-            ];
         }
-        
-        // If there are no real candidates in the database, return some elegant mock placeholders
-        // so that the dashboard doesn't look empty at first launch
-        if (empty($topCandidates)) {
-            $topCandidates = [
-                [
-                    'name' => 'Sarah Jenkins',
-                    'role' => 'Senior Flutter Dev',
-                    'match' => '98%',
-                    'email' => 'sarah@example.com',
-                    'phone' => '+966501234567',
-                    'governorate' => 'Riyadh',
-                    'skills' => ['Flutter', 'Dart', 'Bloc', 'Git'],
-                    'missing_skills' => ['Docker', 'CI/CD'],
-                ],
-                [
-                    'name' => 'Ahmed Ali',
-                    'role' => 'Backend Engineer',
-                    'match' => '94%',
-                    'email' => 'ahmed@example.com',
-                    'phone' => '+966507654321',
-                    'governorate' => 'Jeddah',
-                    'skills' => ['Laravel', 'PHP', 'MySQL', 'APIs'],
-                    'missing_skills' => ['Redis', 'AWS'],
-                ],
-            ];
-        }
-        
+
+        usort($topCandidates, fn ($a, $b) => intval($b['match']) <=> intval($a['match']));
+
         // Take top 5 candidates
         $topCandidates = array_slice($topCandidates, 0, 5);
         
@@ -430,7 +440,7 @@ class JobController extends Controller
                 'company_name' => $user->name,
                 'active_jobs_count' => $activeJobsCount,
                 'stripe_spend' => "\${$stripeSpend}",
-                'suggested_candidates_count' => $suggestedCandidatesCount > 0 ? $suggestedCandidatesCount : 84,
+                'suggested_candidates_count' => $suggestedCandidatesCount,
                 'top_candidates' => $topCandidates,
                 'recent_jobs' => $recentJobs,
             ]
@@ -444,87 +454,83 @@ class JobController extends Controller
     {
         $user = auth()->user();
 
-        // Company's active jobs for matching
         $companyJobs = Job::where('user_id', $user->id)
             ->where('is_paid', true)
             ->get();
 
-        // All job seekers who have uploaded resumes
-        $resumes = \App\Models\UserResume::with('user')
-            ->whereHas('user', function ($q) {
-                $q->where('role', 'job');
-            })
-            ->latest()
-            ->get();
-
         $candidates = [];
 
-        foreach ($resumes as $resume) {
-            if (!$resume->user) continue;
-
-            $bestMatchScore = 70;
-
-            foreach ($companyJobs as $job) {
-                if (
-                    stripos($job->title, $resume->target_job) !== false ||
-                    stripos($resume->target_job, $job->title) !== false
-                ) {
-                    $bestMatchScore = max($bestMatchScore, 95);
-                } else {
-                    $overlap = array_intersect(
-                        array_map('strtolower', $resume->current_skills ?? []),
-                        array_map('strtolower', explode(' ', $job->requirements . ' ' . $job->description))
-                    );
-                    if (count($overlap) > 0) {
-                        $bestMatchScore = max($bestMatchScore, min(70 + count($overlap) * 5, 94));
-                    }
-                }
-            }
-
-            if ($companyJobs->isEmpty()) {
-                $bestMatchScore = rand(85, 98);
-            }
-
-            $candidates[] = [
-                'name'          => $resume->user->name,
-                'role'          => $resume->target_job ?? 'Developer',
-                'match'         => "{$bestMatchScore}%",
-                'email'         => $resume->user->email,
-                'phone'         => $resume->user->phone ?? 'N/A',
-                'governorate'   => $resume->user->governorate ?? 'N/A',
-                'skills'        => $resume->current_skills ?? [],
-                'missing_skills'=> $resume->missing_skills ?? [],
-            ];
-        }
-
-        // Sort by match score descending
-        usort($candidates, fn($a, $b) => intval($b['match']) <=> intval($a['match']));
-
-        // 🔔 Notify top candidates that a company viewed their profile
-        $companyName = $user->name;
-        $topTokens = \App\Models\UserResume::with('user')
-            ->whereHas('user', function ($q) {
-                $q->where('role', 'job')->whereNotNull('fcm_token');
-            })
-            ->latest()
-            ->take(5)
-            ->get();
-
-        $fcm = new FcmService();
-        foreach ($topTokens as $resume) {
-            if ($resume->user && $resume->user->fcm_token) {
-                $fcm->send(
-                    $resume->user->fcm_token,
-                    '🌟 You\'ve Been Shortlisted!',
-                    "{$companyName} is reviewing your profile. Keep your CV updated to stand out!",
-                    ['type' => 'shortlisted', 'company' => $companyName]
-                );
+        foreach ($this->getJobSeekerResumes() as $resume) {
+            $payload = $this->buildCandidatePayload($resume, $companyJobs);
+            if ($payload) {
+                $candidates[] = $payload;
             }
         }
+
+        usort($candidates, fn ($a, $b) => intval($b['match']) <=> intval($a['match']));
 
         return response()->json([
             'success' => true,
             'data'    => $candidates,
+        ]);
+    }
+
+    /**
+     * Get full profile for a single job seeker candidate (company users only).
+     */
+    public function getCandidateProfile(Request $request, int $userId)
+    {
+        $companyUser = auth()->user();
+
+        if ($companyUser->role !== 'company') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only company accounts can view candidate profiles.',
+            ], 403);
+        }
+
+        $candidate = User::where('id', $userId)
+            ->where('role', 'job')
+            ->with('jobSeeker')
+            ->first();
+
+        if (!$candidate) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Candidate not found.',
+            ], 404);
+        }
+
+        $resume = UserResume::where('user_id', $candidate->id)->latest()->first();
+
+        $companyJobs = Job::where('user_id', $companyUser->id)
+            ->where('is_paid', true)
+            ->get();
+
+        $phone = $candidate->phone
+            ?? optional($candidate->jobSeeker)->phone
+            ?? 'N/A';
+
+        $matchScore = $resume
+            ? $this->calculateMatchScore($resume, $companyJobs)
+            : 70;
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'user_id'        => $candidate->id,
+                'name'           => $candidate->name,
+                'email'          => $candidate->email,
+                'phone'          => $phone,
+                'governorate'    => $candidate->governorate ?? 'N/A',
+                'role'           => $resume?->target_job ?? 'Job Seeker',
+                'target_job'     => $resume?->target_job,
+                'match'          => "{$matchScore}%",
+                'skills'         => $resume?->current_skills ?? [],
+                'missing_skills' => $resume?->missing_skills ?? [],
+                'has_cv'         => $resume && !empty($resume->original_text),
+                'profile_source' => ($resume && !empty($resume->original_text)) ? 'cv_upload' : 'manual_entry',
+            ],
         ]);
     }
 }

@@ -1,0 +1,374 @@
+@startuml CareerAI_ClassDiagram
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classHeaderBackgroundColor #1E3A5F
+skinparam classHeaderFontColor #FFFFFF
+skinparam classBorderColor #2C5F8A
+skinparam classBackgroundColor #F0F8FF
+skinparam arrowColor #2C5F8A
+skinparam arrowFontSize 11
+skinparam packageBackgroundColor #E8F4F8
+skinparam packageBorderColor #2C5F8A
+skinparam shadowing false
+skinparam linetype ortho
+
+' ─────────────────────────────────────────────────────────────
+' PACKAGE: Models
+' ─────────────────────────────────────────────────────────────
+package "App\\Models" {
+
+    class User {
+        + id : int
+        + name : string
+        + email : string
+        + password : string
+        + role : string <<enum: job|company|admin>>
+        + phone : string|null
+        + business_type : string|null
+        + governorate : string
+        + fcm_token : string|null
+        + avatar_path : string|null
+        + email_verified_at : datetime|null
+        + remember_token : string|null
+        + created_at : datetime
+        + updated_at : datetime
+        --
+        + jobSeeker() : HasOne
+        + company() : HasOne
+        + resume() : HasOne
+        + sendPasswordResetNotification(token) : void
+    }
+
+    class JobSeeker {
+        + id : int
+        + user_id : int <<FK>>
+        + phone : string|null
+        + created_at : datetime
+        + updated_at : datetime
+        --
+        + user() : BelongsTo
+    }
+
+    class Company {
+        + id : int
+        + user_id : int <<FK>>
+        + phone : string|null
+        + business_type : string|null
+        + commercial_register_path : string|null
+        + description : string|null
+        + verification_status : string <<enum: pending|approved|rejected>>
+        + created_at : datetime
+        + updated_at : datetime
+        --
+        + user() : BelongsTo
+    }
+
+    class Job {
+        + id : int
+        + user_id : int <<FK: company user>>
+        + title : string
+        + job_type : string
+        + location : string
+        + salary : string
+        + description : string
+        + requirements : string
+        + is_paid : boolean
+        + payment_session_id : string|null
+        + created_at : datetime
+        + updated_at : datetime
+        --
+        + user() : BelongsTo
+    }
+
+    class UserResume {
+        + id : int
+        + user_id : int <<FK>>
+        + target_job : string
+        + original_text : text
+        + current_skills : array <<JSON>>
+        + missing_skills : array <<JSON>>
+        + created_at : datetime
+        + updated_at : datetime
+        --
+        + user() : BelongsTo
+    }
+
+    class UserRoadmap {
+        + id : int
+        + user_id : int <<FK>>
+        + target_job : string
+        + roadmap_text : text
+        + missing_skills : array <<JSON>>
+        + suggested_courses : array <<JSON>>
+        + completed_skills : array <<JSON>>
+        + is_active : boolean
+        + created_at : datetime
+        + updated_at : datetime
+    }
+
+    class UserQuiz {
+        + id : int
+        + user_id : int <<FK>>
+        + tested_skills : array <<JSON>>
+        + quiz_data : array <<JSON>>
+        + score : float|null
+        + created_at : datetime
+        + updated_at : datetime
+    }
+
+    class Complaint {
+        + id : int
+        + user_id : int <<FK>>
+        + role : string
+        + subject : string
+        + message : text
+        + status : string <<enum: pending|in_progress|resolved>>
+        + admin_response : string|null
+        + resolved_at : datetime|null
+        + created_at : datetime
+        + updated_at : datetime
+        --
+        + user() : BelongsTo
+    }
+
+    class Shortlist {
+        + id : int
+        + company_user_id : int <<FK: users.id>>
+        + candidate_name : string
+        + candidate_email : string
+        + candidate_phone : string|null
+        + candidate_governorate : string|null
+        + candidate_role : string|null
+        + match_score : float|null
+        + created_at : datetime
+        + updated_at : datetime
+        --
+        + company() : BelongsTo
+    }
+}
+
+' ─────────────────────────────────────────────────────────────
+' PACKAGE: Controllers
+' ─────────────────────────────────────────────────────────────
+package "App\\Http\\Controllers" {
+
+    abstract class Controller {
+    }
+
+    class AuthController {
+        + register(request) : JsonResponse
+        + login(request) : JsonResponse
+        + logout(request) : JsonResponse
+        + me(request) : JsonResponse
+        + updateProfile(request) : JsonResponse
+        + updateFcmToken(request) : JsonResponse
+        + forgotPassword(request) : JsonResponse
+        + resetPassword(request) : JsonResponse
+        + showResetForm(request) : View
+        + handleResetForm(request) : View|Redirect
+    }
+
+    class AiController {
+        # aiService : AiCareerService
+        --
+        + __construct(aiService: AiCareerService)
+        + analyzeGap(request) : JsonResponse
+        + generateRoadmap(request) : JsonResponse
+        + generateQuiz(request) : JsonResponse
+        + submitQuiz(request) : JsonResponse
+        + generateAtsCv(request) : PdfStream|JsonResponse
+        + getActiveRoadmap() : JsonResponse
+        + updateProgress(request) : JsonResponse
+        + getLatestCv() : JsonResponse
+    }
+
+    class JobController {
+        + postJob(request) : JsonResponse
+        + getActiveJobs() : JsonResponse
+        + paymentSuccess(request) : HtmlResponse
+        + paymentCancel(request) : HtmlResponse
+        + showMockCheckout(job_id) : View
+        + getCompanyDashboardData() : JsonResponse
+        + getSuggestedCandidates(request) : JsonResponse
+    }
+
+    class AdminController {
+        + login(request) : JsonResponse
+        + logout(request) : JsonResponse
+        + dashboard() : JsonResponse
+        + pendingCompanies() : JsonResponse
+        + approveCompany(company) : JsonResponse
+        + rejectCompany(company) : JsonResponse
+        + pendingPayments() : JsonResponse
+        + confirmPayment(job) : JsonResponse
+        + complaints(request) : JsonResponse
+        + showComplaint(complaint) : JsonResponse
+        + updateComplaint(request, complaint) : JsonResponse
+        + talentActivity() : JsonResponse
+        # buildNotifications() : array
+    }
+
+    class ComplaintController {
+        + mine(request) : JsonResponse
+        + store(request) : JsonResponse
+    }
+}
+
+' ─────────────────────────────────────────────────────────────
+' PACKAGE: Services
+' ─────────────────────────────────────────────────────────────
+package "App\\Services" {
+
+    class AiCareerService {
+        # geminiApiKey : string
+        # geminiUrl : string
+        --
+        + __construct()
+        # callGemini(prompt, systemInstruction) : string
+        + readCv(pdfFilePath) : string
+        + analyzeGap(cvText, targetJob) : array
+        # scrapeRealCoursesForSkill(skill) : array
+        + generateRoadmapAndCourses(missingSkills, targetJob) : array
+        + generateQuiz(skillsToTest) : array
+        + generateAtsCv(userDataText, allSkills, personalInfo) : string
+        + rankCandidatesForCompany(jobDescription, candidatesResumes) : array
+    }
+
+    class FcmService {
+        - projectId : string
+        - credentials : array
+        --
+        + __construct()
+        + send(token, title, body, data) : bool
+        + sendMultiple(tokens, title, body, data) : void
+        - getAccessToken() : string|null
+        - fetchAccessToken() : string|null
+        - base64url(data) : string
+    }
+}
+
+' ─────────────────────────────────────────────────────────────
+' PACKAGE: Middleware
+' ─────────────────────────────────────────────────────────────
+package "App\\Http\\Middleware" {
+
+    class EnsureAdmin {
+        + handle(request, next) : Response
+    }
+
+    class Authenticate {
+        # redirectTo(request) : string|null
+    }
+}
+
+' ─────────────────────────────────────────────────────────────
+' PACKAGE: Notifications
+' ─────────────────────────────────────────────────────────────
+package "App\\Notifications" {
+
+    class ResetPasswordNotification {
+        + toMail(notifiable) : MailMessage
+        # resetUrl(notifiable) : string
+    }
+}
+
+' ─────────────────────────────────────────────────────────────
+' RELATIONSHIPS - Models
+' ─────────────────────────────────────────────────────────────
+
+User "1" --> "0..1" JobSeeker    : hasOne >
+User "1" --> "0..1" Company      : hasOne >
+User "1" --> "0..1" UserResume   : hasOne (resume) >
+User "1" --> "0..*" Job          : hasMany (posted by company) >
+User "1" --> "0..*" UserRoadmap  : hasMany >
+User "1" --> "0..*" UserQuiz     : hasMany >
+User "1" --> "0..*" Complaint    : hasMany >
+User "1" --> "0..*" Shortlist    : hasMany (as company) >
+
+JobSeeker "1" --> "1" User    : belongsTo >
+Company   "1" --> "1" User    : belongsTo >
+Job       "1" --> "1" User    : belongsTo (company user) >
+UserResume"1" --> "1" User    : belongsTo >
+Complaint "1" --> "1" User    : belongsTo >
+Shortlist "1" --> "1" User    : belongsTo (company_user_id) >
+
+' ─────────────────────────────────────────────────────────────
+' RELATIONSHIPS - Controllers
+' ─────────────────────────────────────────────────────────────
+
+AuthController      --|> Controller
+AiController        --|> Controller
+JobController       --|> Controller
+AdminController     --|> Controller
+ComplaintController --|> Controller
+
+' Controllers use Models
+AuthController      ..> User       : uses
+AuthController      ..> JobSeeker  : uses
+AuthController      ..> Company    : uses
+
+AiController        ..> UserResume  : uses
+AiController        ..> UserRoadmap : uses
+AiController        ..> UserQuiz    : uses
+AiController        ..> AiCareerService : uses
+
+JobController       ..> Job        : uses
+JobController       ..> User       : uses
+JobController       ..> UserResume : uses
+JobController       ..> FcmService : uses
+
+AdminController     ..> User       : uses
+AdminController     ..> Company    : uses
+AdminController     ..> Job        : uses
+AdminController     ..> Complaint  : uses
+AdminController     ..> UserResume : uses
+AdminController     ..> UserRoadmap: uses
+AdminController     ..> UserQuiz   : uses
+AdminController     ..> FcmService : uses
+
+ComplaintController ..> Complaint  : uses
+
+' ─────────────────────────────────────────────────────────────
+' RELATIONSHIPS - Notifications & Middleware
+' ─────────────────────────────────────────────────────────────
+
+User ..> ResetPasswordNotification : sends
+
+' ─────────────────────────────────────────────────────────────
+' NOTES
+' ─────────────────────────────────────────────────────────────
+
+note top of User
+  Role values:
+  - "job"     → JobSeeker profile
+  - "company" → Company profile
+  - "admin"   → Admin only (no sub-profile)
+end note
+
+note bottom of AiCareerService
+  Uses Google Gemini API
+  (gemini-flash-latest)
+  for: gap analysis, roadmap,
+  quiz generation, ATS CV
+end note
+
+note bottom of FcmService
+  Uses Firebase FCM v1 API
+  with JWT/OAuth2 auth
+  for push notifications
+end note
+
+note right of Shortlist
+  company_user_id references
+  users.id (role='company')
+  No direct FK to Company table
+end note
+
+note right of UserRoadmap
+  is_active=true → current roadmap
+  completed_skills updated after
+  passing quiz (score >= 70%)
+end note
+
+@enduml

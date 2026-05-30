@@ -1,0 +1,226 @@
+@startuml CareerAI_ClassDiagram
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classBackgroundColor #FEFEFE
+skinparam classBorderColor #333333
+skinparam arrowColor #555555
+skinparam linetype ortho
+
+' ─────────────────────────────────────────
+'  USERS
+' ─────────────────────────────────────────
+class User {
+  + id : bigint <<PK>>
+  + name : string
+  + email : string <<unique>>
+  + email_verified_at : timestamp <<nullable>>
+  + password : string
+  + role : enum(job, company, admin) = 'job'
+  + phone : string <<nullable>>
+  + business_type : string <<nullable>>
+  + governorate : string <<nullable>>
+  + avatar_path : string <<nullable>>
+  + fcm_token : string <<nullable>>
+  + remember_token : string <<nullable>>
+  + created_at : timestamp
+  + updated_at : timestamp
+  --
+  + jobSeeker() : hasOne
+  + company() : hasOne
+  + resume() : hasOne
+  + sendPasswordResetNotification(token) : void
+}
+
+' ─────────────────────────────────────────
+'  JOB SEEKERS
+' ─────────────────────────────────────────
+class JobSeeker {
+  + id : bigint <<PK>>
+  + user_id : bigint <<FK>>
+  + phone : string <<nullable>>
+  + created_at : timestamp
+  + updated_at : timestamp
+  --
+  + user() : belongsTo
+}
+
+' ─────────────────────────────────────────
+'  COMPANIES
+' ─────────────────────────────────────────
+class Company {
+  + id : bigint <<PK>>
+  + user_id : bigint <<FK>>
+  + phone : string <<nullable>>
+  + business_type : string <<nullable>>
+  + commercial_register_path : string <<nullable>>
+  + description : text <<nullable>>
+  + verification_status : enum(pending, approved, rejected) = 'pending'
+  + created_at : timestamp
+  + updated_at : timestamp
+  --
+  + user() : belongsTo
+}
+
+' ─────────────────────────────────────────
+'  JOBS
+' ─────────────────────────────────────────
+class Job {
+  + id : bigint <<PK>>
+  + user_id : bigint <<FK>>
+  + title : string
+  + job_type : string
+  + location : string
+  + salary : string
+  + description : text
+  + requirements : text
+  + is_paid : boolean = false
+  + payment_session_id : string <<nullable>>
+  + created_at : timestamp
+  + updated_at : timestamp
+  --
+  + user() : belongsTo
+}
+
+' ─────────────────────────────────────────
+'  SHORTLISTS
+' ─────────────────────────────────────────
+class Shortlist {
+  + id : bigint <<PK>>
+  + company_user_id : bigint <<FK>>
+  + candidate_name : string
+  + candidate_email : string
+  + candidate_phone : string <<nullable>>
+  + candidate_governorate : string <<nullable>>
+  + candidate_role : string <<nullable>>
+  + match_score : string <<nullable>>
+  + created_at : timestamp
+  + updated_at : timestamp
+  ' UNIQUE(company_user_id, candidate_email)
+  --
+  + company() : belongsTo(User)
+}
+
+' ─────────────────────────────────────────
+'  COMPLAINTS
+' ─────────────────────────────────────────
+class Complaint {
+  + id : bigint <<PK>>
+  + user_id : bigint <<FK>>
+  + role : string
+  + subject : string
+  + message : text
+  + status : string = 'pending'
+  + admin_response : text <<nullable>>
+  + resolved_at : timestamp <<nullable>>
+  + created_at : timestamp
+  + updated_at : timestamp
+  --
+  + user() : belongsTo
+}
+
+' ─────────────────────────────────────────
+'  USER RESUMES
+' ─────────────────────────────────────────
+class UserResume {
+  + id : bigint <<PK>>
+  + user_id : bigint <<FK, nullable>>
+  + target_job : string <<nullable>>
+  + original_text : longText <<nullable>>
+  + current_skills : json <<nullable>>
+  + missing_skills : json <<nullable>>
+  + created_at : timestamp
+  + updated_at : timestamp
+  --
+  + user() : belongsTo
+}
+
+' ─────────────────────────────────────────
+'  USER ROADMAPS
+' ─────────────────────────────────────────
+class UserRoadmap {
+  + id : bigint <<PK>>
+  + user_id : bigint <<FK, nullable>>
+  + target_job : string <<nullable>>
+  + roadmap_text : longText <<nullable>>
+  + missing_skills : json <<nullable>>
+  + suggested_courses : json <<nullable>>
+  + completed_skills : json <<nullable>>
+  + is_active : boolean = true
+  + created_at : timestamp
+  + updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  USER QUIZZES
+' ─────────────────────────────────────────
+class UserQuiz {
+  + id : bigint <<PK>>
+  + user_id : bigint <<FK, nullable>>
+  + tested_skills : json <<nullable>>
+  + quiz_data : json <<nullable>>
+  + score : integer <<nullable>>
+  + created_at : timestamp
+  + updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  PERSONAL ACCESS TOKENS (Sanctum)
+' ─────────────────────────────────────────
+class PersonalAccessToken {
+  + id : bigint <<PK>>
+  + tokenable_type : string
+  + tokenable_id : bigint
+  + name : string
+  + token : string <<unique>>
+  + abilities : text <<nullable>>
+  + last_used_at : timestamp <<nullable>>
+  + expires_at : timestamp <<nullable>>
+  + created_at : timestamp
+  + updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  PASSWORD RESET TOKENS
+' ─────────────────────────────────────────
+class PasswordResetToken {
+  + email : string <<PK>>
+  + token : string
+  + created_at : timestamp <<nullable>>
+}
+
+' ─────────────────────────────────────────
+'  RELATIONSHIPS
+' ─────────────────────────────────────────
+
+' User → JobSeeker (1 to 0..1)
+User "1" --o "0..1" JobSeeker : hasOne >
+
+' User → Company (1 to 0..1)
+User "1" --o "0..1" Company : hasOne >
+
+' User → UserResume (1 to 0..1)
+User "1" --o "0..1" UserResume : hasOne >
+
+' User → Jobs (1 to many)
+User "1" --o "0..*" Job : hasMany >
+
+' User → Complaints (1 to many)
+User "1" --o "0..*" Complaint : hasMany >
+
+' User → Shortlists (1 to many, via company_user_id)
+User "1" --o "0..*" Shortlist : hasMany (as company) >
+
+' User → UserRoadmaps (1 to many)
+User "1" --o "0..*" UserRoadmap : hasMany >
+
+' User → UserQuizzes (1 to many)
+User "1" --o "0..*" UserQuiz : hasMany >
+
+' User → PersonalAccessToken (polymorphic, Sanctum)
+User "1" --o "0..*" PersonalAccessToken : morphMany >
+
+' User → PasswordResetToken
+User "1" ..o "0..1" PasswordResetToken : email >
+
+@enduml

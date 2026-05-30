@@ -1,0 +1,224 @@
+@startuml CareerAI_ERD
+
+skinparam linetype ortho
+skinparam roundcorner 5
+skinparam classFontSize 12
+skinparam classBackgroundColor #FFFDE7
+skinparam classBorderColor #F57F17
+skinparam arrowColor #555555
+
+hide circle
+hide methods
+
+' ─────────────────────────────────────────
+'  users
+' ─────────────────────────────────────────
+entity "users" as users {
+  * id : bigint <<PK, AI>>
+  --
+  * name : varchar(255)
+  * email : varchar(255) <<unique>>
+    email_verified_at : timestamp <<null>>
+  * password : varchar(255)
+  * role : enum('job','company','admin') = 'job'
+    phone : varchar(255) <<null>>
+    business_type : varchar(255) <<null>>
+    governorate : varchar(255) <<null>>
+    avatar_path : varchar(255) <<null>>
+    fcm_token : varchar(255) <<null>>
+    remember_token : varchar(100) <<null>>
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  job_seekers
+' ─────────────────────────────────────────
+entity "job_seekers" as job_seekers {
+  * id : bigint <<PK, AI>>
+  --
+  * user_id : bigint <<FK → users.id>>
+    phone : varchar(255) <<null>>
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  companies
+' ─────────────────────────────────────────
+entity "companies" as companies {
+  * id : bigint <<PK, AI>>
+  --
+  * user_id : bigint <<FK → users.id>>
+    phone : varchar(255) <<null>>
+    business_type : varchar(255) <<null>>
+    commercial_register_path : varchar(255) <<null>>
+    description : text <<null>>
+  * verification_status : enum('pending','approved','rejected') = 'pending'
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  jobs
+' ─────────────────────────────────────────
+entity "jobs" as jobs {
+  * id : bigint <<PK, AI>>
+  --
+  * user_id : bigint <<FK → users.id>>
+  * title : varchar(255)
+  * job_type : varchar(255)
+  * location : varchar(255)
+  * salary : varchar(255)
+  * description : text
+  * requirements : text
+  * is_paid : boolean = false
+    payment_session_id : varchar(255) <<null>>
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  shortlists
+' ─────────────────────────────────────────
+entity "shortlists" as shortlists {
+  * id : bigint <<PK, AI>>
+  --
+  * company_user_id : bigint <<FK → users.id>>
+  * candidate_name : varchar(255)
+  * candidate_email : varchar(255)
+    candidate_phone : varchar(255) <<null>>
+    candidate_governorate : varchar(255) <<null>>
+    candidate_role : varchar(255) <<null>>
+    match_score : varchar(255) <<null>>
+  * created_at : timestamp
+  * updated_at : timestamp
+  .. UNIQUE ..
+  (company_user_id, candidate_email)
+}
+
+' ─────────────────────────────────────────
+'  complaints
+' ─────────────────────────────────────────
+entity "complaints" as complaints {
+  * id : bigint <<PK, AI>>
+  --
+  * user_id : bigint <<FK → users.id>>
+  * role : varchar(255)
+  * subject : varchar(255)
+  * message : text
+  * status : varchar(255) = 'pending'
+    admin_response : text <<null>>
+    resolved_at : timestamp <<null>>
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  user_resumes
+' ─────────────────────────────────────────
+entity "user_resumes" as user_resumes {
+  * id : bigint <<PK, AI>>
+  --
+    user_id : bigint <<FK → users.id, null>>
+    target_job : varchar(255) <<null>>
+    original_text : longtext <<null>>
+    current_skills : json <<null>>
+    missing_skills : json <<null>>
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  user_roadmaps
+' ─────────────────────────────────────────
+entity "user_roadmaps" as user_roadmaps {
+  * id : bigint <<PK, AI>>
+  --
+    user_id : bigint <<FK → users.id, null>>
+    target_job : varchar(255) <<null>>
+    roadmap_text : longtext <<null>>
+    missing_skills : json <<null>>
+    suggested_courses : json <<null>>
+    completed_skills : json <<null>>
+  * is_active : boolean = true
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  user_quizzes
+' ─────────────────────────────────────────
+entity "user_quizzes" as user_quizzes {
+  * id : bigint <<PK, AI>>
+  --
+    user_id : bigint <<FK → users.id, null>>
+    tested_skills : json <<null>>
+    quiz_data : json <<null>>
+    score : int <<null>>
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  personal_access_tokens  (Sanctum)
+' ─────────────────────────────────────────
+entity "personal_access_tokens" as pat {
+  * id : bigint <<PK, AI>>
+  --
+  * tokenable_type : varchar(255)
+  * tokenable_id : bigint
+  * name : varchar(255)
+  * token : varchar(64) <<unique>>
+    abilities : text <<null>>
+    last_used_at : timestamp <<null>>
+    expires_at : timestamp <<null>>
+  * created_at : timestamp
+  * updated_at : timestamp
+}
+
+' ─────────────────────────────────────────
+'  password_reset_tokens
+' ─────────────────────────────────────────
+entity "password_reset_tokens" as prt {
+  * email : varchar(255) <<PK>>
+  --
+  * token : varchar(255)
+    created_at : timestamp <<null>>
+}
+
+' ─────────────────────────────────────────
+'  RELATIONSHIPS
+' ─────────────────────────────────────────
+
+' users ||--o| job_seekers
+users ||--o| job_seekers : "user_id\n(cascade delete)"
+
+' users ||--o| companies
+users ||--o| companies : "user_id\n(cascade delete)"
+
+' users ||--o{ jobs
+users ||--o{ jobs : "user_id\n(cascade delete)"
+
+' users ||--o{ complaints
+users ||--o{ complaints : "user_id\n(cascade delete)"
+
+' users ||--o{ shortlists  (as company)
+users ||--o{ shortlists : "company_user_id\n(cascade delete)"
+
+' users ||--o| user_resumes
+users ||--o| user_resumes : "user_id\n(null on delete)"
+
+' users ||--o{ user_roadmaps
+users ||--o{ user_roadmaps : "user_id\n(cascade delete)"
+
+' users ||--o{ user_quizzes
+users ||--o{ user_quizzes : "user_id\n(cascade delete)"
+
+' users --o{ personal_access_tokens  (polymorphic)
+users ||--o{ pat : "tokenable_id\n(polymorphic)"
+
+' users ..o| password_reset_tokens  (by email)
+users }o..o| prt : "email"
+
+@enduml
