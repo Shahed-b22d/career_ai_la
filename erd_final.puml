@@ -129,22 +129,18 @@ entity jobs {
 }
 
 ' ─────────────────────────────────────────
-'  SHORTLISTS
+'  COMPANY_CANDIDATES
 ' ─────────────────────────────────────────
-entity shortlists {
+entity company_candidates {
     * id : BIGINT UNSIGNED PK AI
     --
     * company_user_id : BIGINT UNSIGNED FK → users.id (CASCADE)
-    * candidate_name : VARCHAR(255) NOT NULL
-    * candidate_email : VARCHAR(255) NOT NULL
-    candidate_phone : VARCHAR(255) NULL
-    candidate_governorate : VARCHAR(255) NULL
-    candidate_role : VARCHAR(255) NULL
+    * candidate_user_id : BIGINT UNSIGNED FK → users.id (CASCADE)
     match_score : VARCHAR(255) NULL
     * created_at : TIMESTAMP NULL
     * updated_at : TIMESTAMP NULL
     --
-    UNIQUE (company_user_id, candidate_email)
+    UNIQUE (company_user_id, candidate_user_id)
 }
 
 ' ─────────────────────────────────────────
@@ -223,8 +219,11 @@ users ||--o{ companies : "has one\n(companies.user_id)"
 ' users (1) ──< jobs (N) — company posts jobs
 users ||--o{ jobs : "posts\n(jobs.user_id)"
 
-' users (1) ──< shortlists (N) — company shortlists candidates
-users ||--o{ shortlists : "shortlists\n(shortlists.company_user_id)"
+' users (1) ──< company_candidates (N) — company saves candidates
+users ||--o{ company_candidates : "company_candidates\n(company_candidates.company_user_id)"
+
+' users (1) ──< company_candidates (N) — saved job seeker
+users ||--o{ company_candidates : "saved as candidate\n(company_candidates.candidate_user_id)"
 
 ' users (1) ──< complaints (N)
 users ||--o{ complaints : "submits\n(complaints.user_id)"

@@ -5,22 +5,23 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class Shortlist extends Model
+class CompanyCandidate extends Model
 {
     use HasFactory;
 
     protected $fillable = [
         'company_user_id',
-        'candidate_name',
-        'candidate_email',
-        'candidate_phone',
-        'candidate_governorate',
-        'candidate_role',
+        'candidate_user_id',
         'match_score',
     ];
 
     public function company()
     {
         return $this->belongsTo(User::class, 'company_user_id');
+    }
+
+    public function candidate()
+    {
+        return $this->belongsTo(User::class, 'candidate_user_id');
     }
 }

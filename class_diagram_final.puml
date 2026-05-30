@@ -132,19 +132,16 @@ package "App\\Models" {
         + user() : BelongsTo
     }
 
-    class Shortlist {
+    class CompanyCandidate {
         + id : int
         + company_user_id : int <<FK: users.id>>
-        + candidate_name : string
-        + candidate_email : string
-        + candidate_phone : string|null
-        + candidate_governorate : string|null
-        + candidate_role : string|null
+        + candidate_user_id : int <<FK: users.id>>
         + match_score : float|null
         + created_at : datetime
         + updated_at : datetime
         --
         + company() : BelongsTo
+        + candidate() : BelongsTo
     }
 }
 
@@ -284,14 +281,16 @@ User "1" --> "0..*" Job          : hasMany (posted by company) >
 User "1" --> "0..*" UserRoadmap  : hasMany >
 User "1" --> "0..*" UserQuiz     : hasMany >
 User "1" --> "0..*" Complaint    : hasMany >
-User "1" --> "0..*" Shortlist    : hasMany (as company) >
+User "1" --> "0..*" CompanyCandidate : hasMany (as company) >
+User "1" --> "0..*" CompanyCandidate : hasMany (as candidate) >
 
 JobSeeker "1" --> "1" User    : belongsTo >
 Company   "1" --> "1" User    : belongsTo >
 Job       "1" --> "1" User    : belongsTo (company user) >
 UserResume"1" --> "1" User    : belongsTo >
 Complaint "1" --> "1" User    : belongsTo >
-Shortlist "1" --> "1" User    : belongsTo (company_user_id) >
+CompanyCandidate "1" --> "1" User : belongsTo (company_user_id) >
+CompanyCandidate "1" --> "1" User : belongsTo (candidate_user_id) >
 
 ' ─────────────────────────────────────────────────────────────
 ' RELATIONSHIPS - Controllers
@@ -359,10 +358,11 @@ note bottom of FcmService
   for push notifications
 end note
 
-note right of Shortlist
-  company_user_id references
-  users.id (role='company')
-  No direct FK to Company table
+note right of CompanyCandidate
+  company_user_id → users.id (role='company')
+  candidate_user_id → users.id (role='job')
+  Candidate profile data lives in users,
+  job_seekers, and user_resumes
 end note
 
 note right of UserRoadmap
