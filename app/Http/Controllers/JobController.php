@@ -318,63 +318,98 @@ class JobController extends Controller
      * Build candidate payload — يقرأ النسبة من DB (محسوبة مسبقاً بالـ AI).
      * إذا لم تُحسب بعد يستخدم الـ local fallback.
      */
+    /**
+     * Build candidate payload — يقرأ النسبة من DB (محسوبة مسبقاً بالـ AI).
+     * إذا لم تُحسب بعد يستخدم الـ local fallback.
+     */
     private function buildCandidatePayload(UserResume $resume, Collection $companyJobs): ?array
     {
         if (!$resume->user || $resume->user->role !== 'job') {
             return null;
         }
 
-        $matchScore = $this->getBestStoredScore($resume->user_id, $companyJobs);
+        $bestDetails = $this->getBestStoredScoreDetails($resume->user_id, $companyJobs);
 
         return [
-            'user_id'        => $resume->user->id,
-            'name'           => $resume->user->name,
-            'role'           => $resume->target_job ?? 'Job Seeker',
-            'match'          => "{$matchScore}%",
-            'email'          => $resume->user->email,
-            'phone'          => $resume->user->phone ?? 'N/A',
-            'governorate'    => $resume->user->governorate ?? 'N/A',
-            'skills'         => $resume->current_skills ?? [],
-            'missing_skills' => $resume->missing_skills ?? [],
-            'target_job'     => $resume->target_job,
-            'has_cv'         => !empty($resume->original_text),
+            'user_id'           => $resume->user->id,
+            'name'              => $resume->user->name,
+            'role'              => $resume->target_job ?? 'Job Seeker',
+            'match'             => "{$bestDetails['score']}%",
+            'matched_job_id'    => $bestDetails['job_id'],
+            'matched_job_title' => $bestDetails['job_title'],
+            'email'             => $resume->user->email,
+            'phone'             => $resume->user->phone ?? 'N/A',
+            'governorate'       => $resume->user->governorate ?? 'N/A',
+            'skills'            => $resume->current_skills ?? [],
+            'missing_skills'    => $resume->missing_skills ?? [],
+            'target_job'        => $resume->target_job,
+            'has_cv'            => !empty($resume->original_text),
         ];
     }
 
     /**
-     * يجلب أعلى نسبة مخزونة في DB لهذا المرشح مقابل وظائف الشركة.
+     * يجلب أعلى نسبة مخزونة في DB لهذا المرشح مقابل وظائف الشركة وتفاصيل الوظيفة.
      * إذا لم توجد نسبة محسوبة بعد → يحسب محلياً ويحفظ.
      */
-    private function getBestStoredScore(int $candidateUserId, Collection $companyJobs): int
+    private function getBestStoredScoreDetails(int $candidateUserId, Collection $companyJobs): array
     {
         if ($companyJobs->isEmpty()) {
             // لا توجد وظائف → نقيّم جودة الـ profile
             $resume = UserResume::where('user_id', $candidateUserId)->latest()->first();
-            return $resume ? $this->scoreWithoutJob($resume) : 0;
+            $score = $resume ? $this->scoreWithoutJob($resume) : 0;
+            return [
+                'score' => $score,
+                'job_id' => null,
+                'job_title' => null,
+            ];
         }
 
         $jobIds = $companyJobs->pluck('id');
 
         // جلب أعلى نسبة مخزونة
-        $best = JobCandidateScore::where('candidate_user_id', $candidateUserId)
+        $bestScoreRecord = JobCandidateScore::where('candidate_user_id', $candidateUserId)
             ->whereIn('job_id', $jobIds)
-            ->max('match_score');
+            ->orderByDesc('match_score')
+            ->first();
 
-        if ($best !== null) {
-            return (int) $best;
+        if ($bestScoreRecord !== null) {
+            $job = $companyJobs->firstWhere('id', $bestScoreRecord->job_id);
+            return [
+                'score' => (int) $bestScoreRecord->match_score,
+                'job_id' => $bestScoreRecord->job_id,
+                'job_title' => $job ? $job->title : null,
+            ];
         }
 
-        // لم تُحسب بعد → نحسب محلياً كـ fallback مؤقت
+        // لم تُحسب بعد → نحسب محلياً كـ fallback مؤقت ونختار الأفضل
         $resume = UserResume::where('user_id', $candidateUserId)->latest()->first();
         if (!$resume) {
-            return 0;
+            return [
+                'score' => 0,
+                'job_id' => null,
+                'job_title' => null,
+            ];
         }
 
         $bestLocal = 0;
+        $bestJob = null;
         foreach ($companyJobs as $job) {
-            $bestLocal = max($bestLocal, $this->computeScoreForJob($resume, $job));
+            $score = $this->computeScoreForJob($resume, $job);
+            if ($score > $bestLocal) {
+                $bestLocal = $score;
+                $bestJob = $job;
+            }
         }
-        return $bestLocal;
+
+        if ($bestJob === null && $companyJobs->isNotEmpty()) {
+            $bestJob = $companyJobs->first();
+        }
+
+        return [
+            'score' => $bestLocal,
+            'job_id' => $bestJob ? $bestJob->id : null,
+            'job_title' => $bestJob ? $bestJob->title : null,
+        ];
     }
 
     /**
@@ -439,6 +474,102 @@ class JobController extends Controller
         if (count($candidateSkills) >= 5) { $profileScore += 5; }
 
         return min(max($skillScore + $titleScore + $profileScore, 0), 100);
+    }
+
+    /**
+     * GET /api/jobs/{jobId}/candidates
+     * يرجع المرشحين المتوافقين مع وظيفة محددة مرتبين تنازلياً حسب النسبة.
+     * النسب مأخوذة من job_candidate_scores (محسوبة بالـ AI).
+     */
+    public function getJobCandidates(Request $request, int $jobId)
+    {
+        $companyUser = auth()->user();
+
+        // التحقق أن الوظيفة تخص هذه الشركة
+        $job = Job::where('id', $jobId)
+            ->where('user_id', $companyUser->id)
+            ->first();
+
+        if (!$job) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Job not found or does not belong to your account.',
+            ], 404);
+        }
+
+        // جلب كل النسب المحسوبة لهذه الوظيفة مرتبة تنازلياً
+        $scores = JobCandidateScore::where('job_id', $jobId)
+            ->orderByDesc('match_score')
+            ->with(['candidate', 'candidate.jobSeeker'])
+            ->get();
+
+        $candidates = [];
+
+        foreach ($scores as $score) {
+            $candidate = $score->candidate;
+            if (!$candidate || $candidate->role !== 'job') {
+                continue;
+            }
+
+            $resume = UserResume::where('user_id', $candidate->id)->latest()->first();
+
+            $phone = $candidate->phone
+                ?? optional($candidate->jobSeeker)->phone
+                ?? 'N/A';
+
+            $candidates[] = [
+                'user_id'        => $candidate->id,
+                'name'           => $candidate->name,
+                'email'          => $candidate->email,
+                'phone'          => $phone,
+                'governorate'    => $candidate->governorate ?? 'N/A',
+                'role'           => $resume?->target_job ?? 'Job Seeker',
+                'target_job'     => $resume?->target_job,
+                'match'          => "{$score->match_score}%",
+                'match_score'    => $score->match_score,
+                'justification'  => $score->justification,
+                'skills'         => $resume?->current_skills ?? [],
+                'missing_skills' => $resume?->missing_skills ?? [],
+                'has_cv'         => $resume && !empty($resume->original_text),
+            ];
+        }
+
+        // إذا لم تُحسب النسب بعد (الوظيفة جديدة) → نرجع fallback محلي
+        if ($candidates === [] ) {
+            foreach ($this->getJobSeekerResumes() as $resume) {
+                if (!$resume->user) continue;
+                $score = $this->computeScoreForJob($resume, $job);
+                $candidates[] = [
+                    'user_id'        => $resume->user->id,
+                    'name'           => $resume->user->name,
+                    'email'          => $resume->user->email,
+                    'phone'          => $resume->user->phone ?? 'N/A',
+                    'governorate'    => $resume->user->governorate ?? 'N/A',
+                    'role'           => $resume->target_job ?? 'Job Seeker',
+                    'target_job'     => $resume->target_job,
+                    'match'          => "{$score}%",
+                    'match_score'    => $score,
+                    'justification'  => 'Calculated locally',
+                    'skills'         => $resume->current_skills ?? [],
+                    'missing_skills' => $resume->missing_skills ?? [],
+                    'has_cv'         => !empty($resume->original_text),
+                ];
+            }
+            usort($candidates, fn($a, $b) => $b['match_score'] <=> $a['match_score']);
+        }
+
+        return response()->json([
+            'success'    => true,
+            'job_id'     => $job->id,
+            'job_title'  => $job->title,
+            'job_description' => $job->description,
+            'job_requirements' => $job->requirements,
+            'job_location' => $job->location,
+            'job_salary'  => $job->salary,
+            'job_type'    => $job->job_type,
+            'is_paid'     => $job->is_paid,
+            'data'        => $candidates,
+        ]);
     }
 
     /**
@@ -597,34 +728,56 @@ class JobController extends Controller
             ?? 'N/A';
 
         $matchScore = 0;
+        $matchedJobTitle = null;
+
+        $jobId = $request->query('job_id');
+
         if ($resume) {
-            if ($companyJobs->isNotEmpty()) {
-                $stored = JobCandidateScore::where('candidate_user_id', $candidate->id)
-                    ->whereIn('job_id', $companyJobs->pluck('id'))
-                    ->max('match_score');
-                $matchScore = $stored !== null
-                    ? (int) $stored
-                    : $this->computeScoreForJob($resume, $companyJobs->first());
+            if ($jobId) {
+                // إذا تم تمرير وظيفة معينة، نجلب النسبة الخاصة بها فقط
+                $job = Job::where('id', $jobId)
+                    ->where('user_id', $companyUser->id)
+                    ->first();
+                if ($job) {
+                    $matchedJobTitle = $job->title;
+                    $stored = JobCandidateScore::where('candidate_user_id', $candidate->id)
+                        ->where('job_id', $jobId)
+                        ->first();
+                    if ($stored !== null) {
+                        $matchScore = (int) $stored->match_score;
+                    } else {
+                        $matchScore = $this->computeScoreForJob($resume, $job);
+                    }
+                } else {
+                    // إذا لم نجد الوظيفة للشركة، نقع على الافتراضي
+                    $bestDetails = $this->getBestStoredScoreDetails($candidate->id, $companyJobs);
+                    $matchScore = $bestDetails['score'];
+                    $matchedJobTitle = $bestDetails['job_title'];
+                }
             } else {
-                $matchScore = $this->scoreWithoutJob($resume);
+                // الافتراضي: نجلب النسبة لأفضل وظيفة مطابقة
+                $bestDetails = $this->getBestStoredScoreDetails($candidate->id, $companyJobs);
+                $matchScore = $bestDetails['score'];
+                $matchedJobTitle = $bestDetails['job_title'];
             }
         }
 
         return response()->json([
             'success' => true,
             'data' => [
-                'user_id'        => $candidate->id,
-                'name'           => $candidate->name,
-                'email'          => $candidate->email,
-                'phone'          => $phone,
-                'governorate'    => $candidate->governorate ?? 'N/A',
-                'role'           => $resume?->target_job ?? 'Job Seeker',
-                'target_job'     => $resume?->target_job,
-                'match'          => "{$matchScore}%",
-                'skills'         => $resume?->current_skills ?? [],
-                'missing_skills' => $resume?->missing_skills ?? [],
-                'has_cv'         => $resume && !empty($resume->original_text),
-                'profile_source' => ($resume && !empty($resume->original_text)) ? 'cv_upload' : 'manual_entry',
+                'user_id'           => $candidate->id,
+                'name'              => $candidate->name,
+                'email'             => $candidate->email,
+                'phone'             => $phone,
+                'governorate'       => $candidate->governorate ?? 'N/A',
+                'role'              => $resume?->target_job ?? 'Job Seeker',
+                'target_job'        => $resume?->target_job,
+                'match'             => "{$matchScore}%",
+                'matched_job_title' => $matchedJobTitle,
+                'skills'            => $resume?->current_skills ?? [],
+                'missing_skills'    => $resume?->missing_skills ?? [],
+                'has_cv'            => $resume && !empty($resume->original_text),
+                'profile_source'    => ($resume && !empty($resume->original_text)) ? 'cv_upload' : 'manual_entry',
             ],
         ]);
     }

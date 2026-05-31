@@ -59,6 +59,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/company/dashboard', [JobController::class, 'getCompanyDashboardData']);
     Route::get('/candidates/suggested', [JobController::class, 'getSuggestedCandidates']);
     Route::get('/candidates/{userId}', [JobController::class, 'getCandidateProfile']);
+    Route::get('/jobs/{jobId}/candidates', [JobController::class, 'getJobCandidates']);
 
     Route::get('/complaints/mine', [ComplaintController::class, 'mine']);
     Route::post('/complaints', [ComplaintController::class, 'store']);
