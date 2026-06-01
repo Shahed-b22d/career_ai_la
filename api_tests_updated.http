@@ -5,6 +5,23 @@
 ### Authentication (للحصول على Token)
 ### ============================================
 
+### تسجيل دخول الأدمن (بياناتك الجديدة)
+POST http://127.0.0.1:8000/api/admin/login
+Content-Type: application/json
+Accept: application/json
+
+{
+    "email": "admin@career.ai",
+    "password": "password123"
+}
+
+### جلب بيانات الداش بورد (بعد الحصول على الـ Token)
+GET http://127.0.0.1:8000/api/admin/dashboard
+Authorization: Bearer YOUR_ADMIN_TOKEN_HERE
+Accept: application/json
+
+### --------------------------------------------
+
 ### تسجيل الدخول
 POST http://127.0.0.1:8000/api/auth/login
 Content-Type: application/json

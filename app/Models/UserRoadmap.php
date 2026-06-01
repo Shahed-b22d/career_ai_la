@@ -25,4 +25,9 @@ class UserRoadmap extends Model
         'completed_skills' => 'array',
         'is_active' => 'boolean',
     ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }

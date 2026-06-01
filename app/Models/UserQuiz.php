@@ -20,4 +20,9 @@ class UserQuiz extends Model
         'tested_skills' => 'array',
         'quiz_data' => 'array',
     ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }
