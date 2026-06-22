@@ -318,10 +318,6 @@ class JobController extends Controller
      * Build candidate payload — يقرأ النسبة من DB (محسوبة مسبقاً بالـ AI).
      * إذا لم تُحسب بعد يستخدم الـ local fallback.
      */
-    /**
-     * Build candidate payload — يقرأ النسبة من DB (محسوبة مسبقاً بالـ AI).
-     * إذا لم تُحسب بعد يستخدم الـ local fallback.
-     */
     private function buildCandidatePayload(UserResume $resume, Collection $companyJobs): ?array
     {
         if (!$resume->user || $resume->user->role !== 'job') {
