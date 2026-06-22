@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CompanyCandidate;
 use App\Models\Job;
 use App\Models\JobCandidateScore;
 use App\Models\User;
@@ -665,135 +666,6 @@ class JobController extends Controller
     }
 
     /**
-     * Get a single candidate profile by user ID
-     * Optionally accepts job_id to calculate match score against a specific job
-     */
-    public function getCandidateProfile(Request $request, int $userId)
-    {
-        $jobId = $request->query('job_id');
-
-        $resume = \App\Models\UserResume::with('user')
-            ->where('user_id', $userId)
-            ->first();
-
-        if (!$resume || !$resume->user) {
-            return response()->json(['success' => false, 'message' => 'Candidate not found'], 404);
-        }
-
-        $user = $resume->user;
-
-        // Calculate match score
-        $matchScore = 70;
-        $matchedJobTitle = null;
-
-        if ($jobId) {
-            $job = \App\Models\Job::find($jobId);
-            if ($job) {
-                $matchedJobTitle = $job->title;
-                if (
-                    stripos($job->title, $resume->target_job) !== false ||
-                    stripos($resume->target_job, $job->title) !== false
-                ) {
-                    $matchScore = 95;
-                } else {
-                    $overlap = array_intersect(
-                        array_map('strtolower', $resume->current_skills ?? []),
-                        array_map('strtolower', explode(' ', $job->requirements . ' ' . $job->description))
-                    );
-                    if (count($overlap) > 0) {
-                        $matchScore = min(70 + count($overlap) * 5, 94);
-                    }
-                }
-            }
-        }
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'user_id'           => $user->id,
-                'name'              => $user->name,
-                'email'             => $user->email,
-                'phone'             => $user->phone ?? 'N/A',
-                'governorate'       => $user->governorate ?? 'N/A',
-                'role'              => $resume->target_job ?? 'Job Seeker',
-                'target_job'        => $resume->target_job,
-                'match'             => "{$matchScore}%",
-                'matched_job_title' => $matchedJobTitle,
-                'skills'            => $resume->current_skills ?? [],
-                'missing_skills'    => $resume->missing_skills ?? [],
-            ],
-        ]);
-    }
-
-    /**
-     * Get all AI-matched candidates for a specific job posting
-     */
-    public function getJobCandidates(Request $request, int $jobId)
-    {
-        $job = \App\Models\Job::find($jobId);
-
-        if (!$job) {
-            return response()->json(['success' => false, 'message' => 'Job not found'], 404);
-        }
-
-        $resumes = \App\Models\UserResume::with('user')
-            ->whereHas('user', function ($q) {
-                $q->where('role', 'job');
-            })
-            ->latest()
-            ->get();
-
-        $candidates = [];
-
-        foreach ($resumes as $resume) {
-            if (!$resume->user) continue;
-
-            $matchScore = 70;
-
-            if (
-                stripos($job->title, $resume->target_job) !== false ||
-                stripos($resume->target_job, $job->title) !== false
-            ) {
-                $matchScore = 95;
-            } else {
-                $overlap = array_intersect(
-                    array_map('strtolower', $resume->current_skills ?? []),
-                    array_map('strtolower', explode(' ', $job->requirements . ' ' . $job->description))
-                );
-                if (count($overlap) > 0) {
-                    $matchScore = min(70 + count($overlap) * 5, 94);
-                }
-            }
-
-            $candidates[] = [
-                'user_id'           => $resume->user->id,
-                'name'              => $resume->user->name,
-                'email'             => $resume->user->email,
-                'phone'             => $resume->user->phone ?? 'N/A',
-                'governorate'       => $resume->user->governorate ?? 'N/A',
-                'role'              => $resume->target_job ?? 'Job Seeker',
-                'match'             => "{$matchScore}%",
-                'matched_job_title' => $job->title,
-                'matched_job_id'    => $job->id,
-                'skills'            => $resume->current_skills ?? [],
-                'missing_skills'    => $resume->missing_skills ?? [],
-            ];
-        }
-
-        // Sort by match score descending
-        usort($candidates, fn($a, $b) => intval($b['match']) <=> intval($a['match']));
-
-        return response()->json([
-            'success' => true,
-            'data'    => $candidates,
-            'job'     => [
-                'id'    => $job->id,
-                'title' => $job->title,
-            ],
-        ]);
-    }
-
-    /**
      * Shortlist a candidate — saves to DB and sends a real FCM notification
      */
     public function shortlistCandidate(Request $request, int $userId)
@@ -836,18 +708,16 @@ class JobController extends Controller
             }
         }
 
-        // احفظ في جدول shortlists (أو تجاهل إذا موجود مسبقاً)
-        \App\Models\Shortlist::firstOrCreate(
+        // احفظ في جدول company_candidates (أو تجاهل إذا موجود مسبقاً)
+        CompanyCandidate::firstOrCreate(
             [
-                'company_user_id' => $company->id,
-                'candidate_email' => $candidate->email,
+                'company_user_id'   => $company->id,
+                'candidate_user_id' => $candidate->id,
             ],
             [
-                'candidate_name'        => $candidate->name,
-                'candidate_phone'       => $candidate->phone ?? 'N/A',
-                'candidate_governorate' => $candidate->governorate ?? 'N/A',
-                'candidate_role'        => $resume->target_job ?? 'Job Seeker',
-                'match_score'           => $matchScore,
+                'match_score' => is_string($matchScore)
+                    ? (int) rtrim($matchScore, '%')
+                    : (int) $matchScore,
             ]
         );
 

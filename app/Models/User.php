@@ -35,6 +35,7 @@ class User extends Authenticatable
         'business_type',
         'governorate',
         'fcm_token',
+        'avatar_path',
     ];
 
     public function jobSeeker()

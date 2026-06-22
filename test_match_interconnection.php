@@ -126,7 +126,7 @@ if (isset($dashboardData['success']) && $dashboardData['success'] === true) {
 
 // 2. Test getCandidateProfile Endpoint Logic
 echo "\n--- Testing Candidate Profile Context-Aware Scoring ---\n";
-$firstCandidate = $resumes->first()->user;
+$firstCandidate = $seekerUser;
 echo "Selected Candidate: {$firstCandidate->name} (ID: {$firstCandidate->id})\n";
 
 // A. Test without passing job_id (Should default to best match)

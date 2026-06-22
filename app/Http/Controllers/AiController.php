@@ -241,8 +241,8 @@ class AiController extends Controller
             $personalInfo = "";
             if ($user) {
                 $user->load('jobSeeker');
-                $phone = $user->jobSeeker->phone ?? 'Not specified';
-                $gov = $user->jobSeeker->governorate ?? 'Not specified';
+                $phone = optional($user->jobSeeker)->phone ?? $user->phone ?? 'Not specified';
+                $gov = optional($user->jobSeeker)->governorate ?? $user->governorate ?? 'Not specified';
                 $personalInfo = "Name: {$user->name}\nEmail: {$user->email}\nPhone: {$phone}\nLocation: {$gov}";
             }
 
