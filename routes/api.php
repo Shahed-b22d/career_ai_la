@@ -40,10 +40,12 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::get('/complaints/{complaint}', [AdminController::class, 'showComplaint']);
     Route::patch('/complaints/{complaint}', [AdminController::class, 'updateComplaint']);
     Route::get('/talent-activity', [AdminController::class, 'talentActivity']);
+    Route::get('/users', [AdminController::class, 'getUsers']);
+    Route::delete('/users/{user}', [AdminController::class, 'deleteUser']);
 });
 
 Route::post('/auth/register', [AuthController::class, 'register']);
-Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/login', [AuthController::class, 'login'])->name('login');
 Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/auth/reset-password', [AuthController::class, 'resetPassword']);
 
@@ -58,6 +60,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/jobs', [JobController::class, 'getActiveJobs']);
     Route::get('/company/dashboard', [JobController::class, 'getCompanyDashboardData']);
     Route::get('/candidates/suggested', [JobController::class, 'getSuggestedCandidates']);
+    Route::post('/candidates/{userId}/shortlist', [JobController::class, 'shortlistCandidate']);
     Route::get('/candidates/{userId}', [JobController::class, 'getCandidateProfile']);
     Route::get('/jobs/{jobId}/candidates', [JobController::class, 'getJobCandidates']);
 

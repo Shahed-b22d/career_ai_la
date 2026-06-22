@@ -1,5 +1,5 @@
 try {
-    $body = '{"email":"test@test.com","password":"123456","role":"job"}'
+    $body = '{"email":"ahmad@test.com","password":"password123","role":"job"}'
     $headers = @{
         'Content-Type' = 'application/json'
         'Accept'       = 'application/json'

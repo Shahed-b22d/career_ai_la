@@ -402,6 +402,63 @@ class AdminController extends Controller
     }
 
     /**
+     * GET /api/admin/users?role=job|company
+     */
+    public function getUsers(Request $request)
+    {
+        $role = $request->query('role', 'all');
+
+        $query = User::with('company')
+            ->whereIn('role', ['job', 'company', 'seeker']);
+
+        if ($role === 'job') {
+            $query->where('role', 'job');
+        } elseif ($role === 'company') {
+            $query->where('role', 'company');
+        }
+
+        $users = $query->latest()->get()->map(fn ($u) => [
+            'id'            => $u->id,
+            'name'          => $u->name,
+            'email'         => $u->email,
+            'phone'         => $u->phone ?? 'N/A',
+            'governorate'   => $u->governorate ?? 'N/A',
+            'role'          => $u->role,
+            'business_type' => $u->company?->business_type ?? $u->business_type ?? 'N/A',
+            'verified'      => $u->company?->verification_status ?? 'N/A',
+            'created_at'    => $u->created_at->format('Y-m-d'),
+            'complaints_count' => Complaint::where('user_id', $u->id)->count(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $users,
+            'counts'  => [
+                'job'     => User::where('role', 'job')->count(),
+                'company' => User::where('role', 'company')->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * DELETE /api/admin/users/{user}
+     */
+    public function deleteUser(User $user)
+    {
+        if ($user->role === 'admin') {
+            return response()->json(['success' => false, 'message' => 'Cannot delete admin accounts'], 403);
+        }
+
+        $name = $user->name;
+        $user->delete(); // cascade deletes related records
+
+        return response()->json([
+            'success' => true,
+            'message' => "User \"{$name}\" has been deleted successfully.",
+        ]);
+    }
+
+    /**
      * POST /api/admin/logout
      */
     public function logout(Request $request)
