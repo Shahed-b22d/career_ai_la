@@ -98,6 +98,7 @@ class AdminController extends Controller
             ]);
 
         $notifications = $this->buildNotifications();
+        $talentActivity = $this->getTalentActivityData(10);
 
         return response()->json([
             'success' => true,
@@ -120,6 +121,7 @@ class AdminController extends Controller
                 ],
                 'complaints'    => $complaints,
                 'notifications' => $notifications,
+                'talent_activity' => $talentActivity,
             ],
         ]);
     }
@@ -343,54 +345,63 @@ class AdminController extends Controller
      */
     public function talentActivity()
     {
+        return response()->json([
+            'success' => true,
+            'data'    => $this->getTalentActivityData(30)
+        ]);
+    }
+
+    /**
+     * منطق مشترك لجلب آخر نشاطات المواهب من السير الذاتية والخرائط والكويزات
+     */
+    protected function getTalentActivityData($limit = 30)
+    {
         $activities = collect();
+        $perTypeLimit = 15;
 
-        UserResume::with('user:id,name')
+        // جلب نشاطات السير الذاتية - أضفنا تأكداً من وجود البيانات
+        $resumes = UserResume::with('user')->latest()->take($perTypeLimit)->get();
+        foreach ($resumes as $r) {
+            $activities->push([
+                'name'       => $r->user?->name ?? 'User #' . $r->user_id,
+                'action'     => 'Analyzed CV' . ($r->target_job ? " for {$r->target_job}" : " for a new position"),
+                'icon'       => 'cv',
+                'time'       => $r->created_at ? $r->created_at->diffForHumans() : 'Recently',
+                'created_at' => $r->created_at,
+            ]);
+        }
+
+        // جلب نشاطات خارطة الطريق
+        UserRoadmap::with('user')
             ->latest()
-            ->take(15)
+            ->take($perTypeLimit)
             ->get()
             ->each(function ($r) use ($activities) {
                 $activities->push([
-                    'name'       => $r->user?->name ?? 'User',
-                    'action'     => 'Uploaded CV',
-                    'icon'       => 'cv',
-                    'time'       => $r->created_at->diffForHumans(),
-                    'created_at' => $r->created_at,
-                ]);
-            });
-
-        UserRoadmap::with('user:id,name')
-            ->latest()
-            ->take(15)
-            ->get()
-            ->each(function ($r) use ($activities) {
-                $activities->push([
-                    'name'       => $r->user?->name ?? 'User',
-                    'action'     => 'Roadmap generated',
+                    'name'       => $r->user?->name ?? 'Talent',
+                    'action'     => 'Generated learning roadmap',
                     'icon'       => 'roadmap',
-                    'time'       => $r->created_at->diffForHumans(),
+                    'time'       => $r->created_at ? $r->created_at->diffForHumans() : 'Recently',
                     'created_at' => $r->created_at,
                 ]);
             });
 
-        UserQuiz::with('user:id,name')
-            ->whereNotNull('score')
+        // جلب نشاطات الكويزات - أزلنا شرط whereNotNull مؤقتاً للتأكد من ظهور البيانات
+        UserQuiz::with('user')
             ->latest()
-            ->take(15)
+            ->take($perTypeLimit)
             ->get()
             ->each(function ($q) use ($activities) {
                 $activities->push([
-                    'name'       => $q->user?->name ?? 'User',
-                    'action'     => 'Quiz completed (' . $q->score . '%)',
+                    'name'       => $q->user?->name ?? 'Talent',
+                    'action'     => 'Passed quiz with ' . $q->score . '% score',
                     'icon'       => 'quiz',
-                    'time'       => $q->updated_at->diffForHumans(),
+                    'time'       => $q->updated_at ? $q->updated_at->diffForHumans() : 'Recently',
                     'created_at' => $q->updated_at,
                 ]);
             });
 
-        $sorted = $activities->sortByDesc('created_at')->values()->take(30);
-
-        return response()->json(['success' => true, 'data' => $sorted]);
+        return $activities->sortByDesc('created_at')->values()->take($limit);
     }
 
     /**
