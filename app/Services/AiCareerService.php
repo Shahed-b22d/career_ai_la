@@ -11,7 +11,7 @@ use Symfony\Component\DomCrawler\Crawler;
 class AiCareerService
 {
     protected string $geminiApiKey;
-    protected string $geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
+    protected string $geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
     public function __construct()
     {
@@ -23,6 +23,12 @@ class AiCareerService
      */
     protected function callGemini(string $prompt, string $systemInstruction = null): string
     {
+        // Clean UTF-8 strings to prevent json_encode failures on malformed text
+        $prompt = mb_convert_encoding($prompt, 'UTF-8', 'UTF-8');
+        if ($systemInstruction !== null) {
+            $systemInstruction = mb_convert_encoding($systemInstruction, 'UTF-8', 'UTF-8');
+        }
+
         $payload = [
             'contents' => [
                 [
@@ -47,31 +53,76 @@ class AiCareerService
         Log::info("DEBUG: API Key Hint: " . substr($this->geminiApiKey, 0, 4) . "...");
         
         $url = $this->geminiUrl . '?key=' . $this->geminiApiKey;
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 60);
-        
-        $responseRaw = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
-        curl_close($ch);
 
-        Log::info("DEBUG: Gemini CURL HTTP Status: " . $httpCode);
-        if ($curlError) {
-            Log::info("DEBUG: CURL Error: " . $curlError);
+        $encodedPayload = json_encode($payload, JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($encodedPayload === false) {
+            Log::error("JSON encode failed in callGemini: " . json_last_error_msg());
+            throw new Exception("Failed to encode request payload: " . json_last_error_msg());
         }
 
-        Log::info("DEBUG: Gemini Raw Response: " . $responseRaw);
+        // Retry logic: up to 3 attempts on 429 RESOURCE_EXHAUSTED
+        $maxAttempts = 3;
+        $httpCode    = 0;
+        $responseRaw = '';
+        $curlError   = '';
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $encodedPayload);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 90);
+
+            $responseRaw = curl_exec($ch);
+            $httpCode    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError   = curl_error($ch);
+            curl_close($ch);
+
+            Log::info("DEBUG: Gemini CURL HTTP Status (attempt {$attempt}): " . $httpCode);
+            if ($curlError) {
+                Log::info("DEBUG: CURL Error: " . $curlError);
+            }
+
+            if ($httpCode == 200) {
+                break; // success – exit retry loop
+            }
+
+            if ($httpCode == 429 && $attempt < $maxAttempts) {
+                // Parse retryDelay from the response (e.g. "7s" → 7 seconds)
+                $retryDelay = 20; // default seconds
+                $decoded429 = json_decode($responseRaw, true);
+                if (isset($decoded429['error']['details'])) {
+                    foreach ($decoded429['error']['details'] as $detail) {
+                        if (isset($detail['retryDelay'])) {
+                            $retryDelay = (int) filter_var($detail['retryDelay'], FILTER_SANITIZE_NUMBER_INT);
+                            $retryDelay = max($retryDelay, 5); // minimum 5s
+                            break;
+                        }
+                    }
+                }
+                Log::warning("Gemini 429 quota exceeded. Waiting {$retryDelay}s before retry (attempt {$attempt}/{$maxAttempts})...");
+                sleep($retryDelay);
+                continue;
+            }
+
+            // For non-429 errors, break immediately
+            break;
+        }
+
+        Log::info("DEBUG: Gemini Raw Response: " . substr($responseRaw, 0, 500));
 
         if ($httpCode == 200) {
             $data = json_decode($responseRaw, true);
             if (isset($data['candidates'][0]['content']['parts'][0]['text'])) {
                 return $data['candidates'][0]['content']['parts'][0]['text'];
             }
+        }
+
+        // Friendly message for quota errors
+        if ($httpCode == 429) {
+            throw new Exception("AI service is busy due to high usage. Please wait a moment and try again.");
         }
 
         Log::error("Gemini API Error: " . ($curlError ?: $responseRaw));
@@ -96,6 +147,9 @@ class AiCareerService
             // تنظيف النص من الأحرف الغريبة والمسافات الزائدة
             $text = preg_replace('/\s+/', ' ', $text);
             $text = trim($text);
+
+            // Clean UTF-8 strings to prevent DB insertion and JSON encoding issues on malformed PDF text
+            $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
             
             if (empty($text)) {
                 throw new Exception("Could not extract text from PDF. The file might be image-based or corrupted.");

@@ -18,7 +18,7 @@ class AiController extends Controller
 
     public function __construct(AiCareerService $aiService, CandidateScoringService $scoringService)
     {
-        set_time_limit(120);
+        set_time_limit(300); // Allow up to 5 min for AI retries on quota limits
         $this->aiService      = $aiService;
         $this->scoringService = $scoringService;
     }
