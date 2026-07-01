@@ -40,8 +40,7 @@ class AiController extends Controller
             Log::info("DEBUG: Validation Passed. Target: " . $request->target_job);
             $cvText = "";
             if ($request->hasFile('cv_file')) {
-                // قراءة الـ PDF
-                Log::info("DEBUG: Calling Gemini for Analysis...");
+                Log::info("DEBUG: Reading CV file...");
                 $cvText = $this->aiService->readCv($request->file('cv_file')->getPathname());
             } elseif ($request->filled('manual_text')) {
                 $cvText = $request->input('manual_text');

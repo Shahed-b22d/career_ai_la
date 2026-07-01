@@ -3,10 +3,7 @@
 namespace App\Services;
 
 use Exception;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Spatie\PdfToText\Pdf;
-use Symfony\Component\DomCrawler\Crawler;
 
 class AiCareerService
 {
@@ -15,8 +12,8 @@ class AiCareerService
 
     public function __construct()
     {
-        // يجب تعيين قيمة GEMINI_API_KEY في ملف .env
-        $this->geminiApiKey = config('services.gemini.key');    }
+        $this->geminiApiKey = config('services.gemini.key');
+    }
 
     /**
      * دالة عامة للاتصال بـ Gemini
@@ -222,58 +219,6 @@ Instructions:
         }
         
         return $parsed ?: ['current_skills' => [], 'missing_skills' => [], 'panel_feedback' => ''];
-    }
-
-    /**
-     * Scrape DuckDuckGo for REAL free courses across multiple platforms
-     */
-    protected function scrapeRealCoursesForSkill(string $skill): array
-    {
-        $platforms = [
-            'YouTube' => 'site:youtube.com "full course" OR tutorial',
-            'Coursera' => 'site:coursera.org "free course"',
-            'Udemy' => 'site:udemy.com "free tutorial"'
-        ];
-
-        $courses = [];
-
-        foreach ($platforms as $platformName => $searchQuery) {
-            $query = urlencode($searchQuery . ' ' . $skill);
-            $response = Http::withoutVerifying()
-                ->withHeaders([
-                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-                    'Accept-Language' => 'en-US,en;q=0.9'
-                ])
-                ->get("https://html.duckduckgo.com/html/?q={$query}");
-            
-            if ($response->successful()) {
-                try {
-                    $crawler = new Crawler($response->body());
-                    $firstResult = $crawler->filter('.result__title .result__a')->first();
-                    
-                    if ($firstResult->count() > 0) {
-                        $url = $firstResult->attr('href');
-                        // DuckDuckGo redirects wrapper: //duckduckgo.com/l/?uddg=...
-                        if (str_contains($url, 'uddg=')) {
-                            parse_str(parse_url($url, PHP_URL_QUERY) ?? '', $queryArgs);
-                            if (isset($queryArgs['uddg'])) {
-                                $url = urldecode($queryArgs['uddg']);
-                            }
-                        }
-                        
-                        $courses[] = [
-                            'platform' => $platformName,
-                            'title' => trim($firstResult->text()),
-                            'url' => $url
-                        ];
-                    }
-                } catch (\Exception $e) {
-                    // Ignore extraction errors for this platform and continue
-                }
-            }
-        }
-
-        return $courses;
     }
 
     /**

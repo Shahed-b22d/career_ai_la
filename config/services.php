@@ -14,8 +14,8 @@ return [
     |
     */
     'gemini' => [
-    'key' => env('GEMINI_API_KEY'),
-],
+        'key' => env('GEMINI_API_KEY'),
+    ],
 
     'mailgun' => [
         'domain' => env('MAILGUN_DOMAIN'),

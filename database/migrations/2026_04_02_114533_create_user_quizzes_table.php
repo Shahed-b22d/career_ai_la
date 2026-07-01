@@ -13,7 +13,7 @@ return new class extends Migration
             $table->foreignId('user_id')->nullable()->constrained()->cascadeOnDelete();
             $table->json('tested_skills')->nullable();
             $table->json('quiz_data')->nullable(); // Questions and choices
-            $table->integer('score')->nullable();
+            $table->decimal('score', 5, 2)->nullable();
             $table->timestamps();
         });
     }

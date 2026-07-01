@@ -19,6 +19,7 @@ class UserQuiz extends Model
     protected $casts = [
         'tested_skills' => 'array',
         'quiz_data' => 'array',
+        'score' => 'float',
     ];
 
     public function user()

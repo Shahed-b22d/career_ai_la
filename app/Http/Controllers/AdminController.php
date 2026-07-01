@@ -409,7 +409,7 @@ class AdminController extends Controller
         $role = $request->query('role', 'all');
 
         $query = User::with('company')
-            ->whereIn('role', ['job', 'company', 'seeker']);
+            ->whereIn('role', ['job', 'company']);
 
         if ($role === 'job') {
             $query->where('role', 'job');
